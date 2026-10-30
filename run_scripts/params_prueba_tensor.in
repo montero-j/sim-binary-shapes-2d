@@ -1,0 +1,89 @@
+# params_prueba_tensor.in: prueba corta del tensor de estrés en los atascos
+# (ver simulation/README_tensor_atasco.md y run_scripts/prueba_tensor.sh)
+# Archivo con parámetros que definen la simulación
+# de eo-silo en Box2D
+# Manuel Carlevaro
+# 2024.08.05
+
+# Nota: Box2D utiliza el sistema métrico MKS
+
+# Detalles del contenedor
+
+# Silo 
+#	[Radio_silo]: ancho del silo (R) 20.5
+#	[H]: Altura del silo
+#	[Radio_salida]: Radio de la abertura de salida (r)
+#   [theta]: Ángulo de inclinación del plano de la caja respecto de la horizontal (grados)
+#	[Caja_fric]: Coeficiente de fricción de la caja 0 <= Caja_fric 
+#	[Caja_rest]: Coeficiente de restitución de la caja 0 <= Caja_rest <= 1
+#	[Caja_muBase]: Coeficiente ficticio de fricción con las bases >= 0
+Radio_silo: 5.0
+H: 40.0
+Radio_salida: 1.1
+theta: 0.0
+Silo_fric: 0.5
+Silo_rest: 0.05
+Silo_muBase: 0.0
+
+# Granos
+#	[noTipoGranos]: cantidad de tipos de granos diferentes
+#	Por cada tipo de grano:
+#	[noGranos radio nLados dens fric rest ]
+#	(int double int double double double)
+#	Notas:
+#		nLados = 1 es un disco, o 3 <= nLados <= 8
+#		[radio] = m, [dens] = kg/m¹
+#		[fric]: Coeficiente de fricción del grano 0 <= fric 
+#		[rest]: Coeficiente de restitución del grano 0 <= rest <= 1
+noTipoGranos: 2
+250 0.5 4 1.27324 0.5 0.1
+120 0.158 1 1.27324 0.5 0.1
+
+# Control de la simulación
+# [timeStep]: Paso de integración del movimiento (en s)
+# [tMax]: Máximo tiempo de simulación (en s)
+# [tFill]: Tiempo con la tapa del silo colocada (en s). Si < timeStep, espera al reposo
+# [pIter]: iteraciones de posicion para la satisfacción de restricciones
+# [vIter]: iteraciones de velocidad para la satisfacción de restricciones
+# [g]: Aceleracion de la gravedad (componente y)
+# [reinyected]: T si se reinyectan los granos por encima
+# [Bullets]: T si se consideran bullets los granos
+# [RandomSeed]: Semilla del generador de números aleatorios
+# [tEsperaAtasco]: Tiempo de espera de atasco antes de desatascar con raycast (s)
+timeStep: 0.001 
+tMax: 250.0
+tFill: 8.0
+pIter: 20
+vIter: 20
+g: -9.8
+Reinyected: T
+Bullets: T
+RandomSeed: 12345
+tEsperaAtasco: 5.0
+maxAvalanchas: 8
+
+# Parámetros de registro
+# [dirID]: sufijo del nombre del directorio de guardado de frames
+# [preFrameFile]: prefijo del archivo de salida de frames
+# [saveFrameFreq]: Paso de guardado de los frames
+# [fluxFile]: nombre del archivo de guardado de flujo
+# [fluxFreq]: paso de guardado de flujo
+# [Q6_Freq]: paso de guardado de Q6
+# [VE_freq]: Frecuencia de guardado de velocidades y energías (en pasos) 
+# [veFile]: Archivo de guardado de velocidades y energías
+# [saveForcesFreq]: paso de guardado de fuerzas de contacto (0: no guarda)
+# [tStartCF]: instante de inicio de guardado de fuerzas de contacto
+# [tEndCF]: instante de final de guardado de fuerzas de contacto
+dirID: prueba
+preFrameFile: frm
+saveFrameFreq: 0
+fluxFile: flx.dat
+fluxFreq: 5
+Q6_Freq: 0
+VE_freq: 0
+veFile: velEnergias.dat
+saveForcesFreq: 0
+tStartCF: 4.0
+tEndCF: 5.0
+
+# Fin de params.ini

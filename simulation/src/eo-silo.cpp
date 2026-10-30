@@ -29,6 +29,7 @@ using std::sin; using std::cos; using std::fabs; using std::sqrt;
 #include <cstdlib>
 using std::exit;
 #include "siloAux.hpp"
+#include "jam_output.hpp"
 #include "random.hpp"
 #include <queue>
 #include <unordered_map>
@@ -767,6 +768,11 @@ int main(int argc, char *argv[])
                 // ---------------------------------------------------------
                 jamEventCount++; 
                 saveAtascoFrame(&world, globalSetup, jamEventCount);
+                // Contactos (entrada de presion_tensor_arch.py) y tensor de
+                // estrés calculado en la simulación, del mismo instante
+                saveAtascoContacts(&world, globalSetup, jamEventCount);
+                saveAtascoTensor(&world, globalSetup, jamEventCount,
+                                 currentTime);
                 // ---------------------------------------------------------
 
 

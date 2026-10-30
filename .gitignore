@@ -40,3 +40,6 @@ processed_data/_historico/
 
 # Salidas de presion_tensor_arch.py (parquet, csv, lotes_ok.txt, procesados.txt, log)
 processed_data/presion/tensor_*/
+
+# Carpeta de trabajo de run_scripts/prueba_tensor.sh
+prueba_tensor/

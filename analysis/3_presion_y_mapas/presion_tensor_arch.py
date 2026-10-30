@@ -414,18 +414,54 @@ def normales_contacto(df, paredes=None, metodo='nuevo'):
     return n[:, 0], n[:, 1]
 
 
+def leer_normales_box2d(contact_file, df_contacts):
+    """Normales de Box2D (de A hacia B) de atasco_contacts_full_<jam>.dat, el
+    archivo que escribe el simulador desde la rama tensor-en-simulacion
+    (simulation/README_tensor_atasco.md). Tiene las mismas filas, en el mismo
+    orden, que atasco_contacts_<jam>.dat.
+
+    Devuelve (normales, motivo): normales es un array (m, 2), o None si el
+    archivo no existe o no coincide fila por fila con df_contacts (en ese
+    caso se usa la normal inferida de la geometria, como con los datos
+    viejos); motivo explica cual de los dos casos se dio."""
+    d, nombre = os.path.split(contact_file)
+    full = os.path.join(d, nombre.replace('atasco_contacts_', 'atasco_contacts_full_', 1))
+    if not os.path.exists(full):
+        return None, 'inferidas (sin atasco_contacts_full)'
+    cols = None
+    with open(full) as f:
+        for linea in f:
+            if not linea.startswith('#'):
+                break
+            cols = linea[1:].split()
+    df_full = pd.read_csv(full, sep=r'\s+', comment='#', names=cols,
+                          usecols=['ID_A', 'ID_B', 'nx', 'ny'], engine='c')
+    if (len(df_full) != len(df_contacts)
+            or not np.array_equal(df_full['ID_A'].to_numpy(), df_contacts['id_a'].to_numpy())
+            or not np.array_equal(df_full['ID_B'].to_numpy(), df_contacts['id_b'].to_numpy())):
+        return None, 'inferidas (atasco_contacts_full no coincide fila por fila)'
+    return df_full[['nx', 'ny']].to_numpy(np.float64), 'box2d'
+
+
 def fuerzas_contacto(df_particles, df_contacts, dt, paredes=None, metodo='nuevo',
-                     signo_tan=1.0, dividir_dt=True):
+                     signo_tan=1.0, dividir_dt=True, normales=None):
     """Fuerza de cada contacto sobre el cuerpo A (Fx_A, Fy_A), con la normal
     de A hacia B. La fuerza sobre B es -F_A (3ra ley). Box2D aplica sobre B
     el impulso fn*n + ft*t_b2d, t_b2d = (n_y, -n_x) = -t con t = (-n_y, n_x);
     sobre A: -fn*n - ft*t_b2d = -fn*n + ft*t. Verificado con el equilibrio
     estatico de cada grano (analysis/utils/verificar_contactos.py).
+    normales: array (m, 2) con la normal de Box2D de cada fila de
+    df_contacts (ver leer_normales_box2d); si es None, se infiere de la
+    geometria con normales_contacto. La inferencia falla en los contactos
+    esquina contra esquina entre poligonos (simulation/README_tensor_atasco.md).
     signo_tan y dividir_dt solo existen para el diagnostico."""
     part_cols = df_particles[['pos_x', 'pos_y', 'shape', 'coords']]
     df = df_contacts.merge(part_cols, left_on='id_a', right_index=True, how='left')
     df = df.merge(part_cols, left_on='id_b', right_index=True, how='left', suffixes=('_A', '_B'))
-    nx, ny = normales_contacto(df, paredes, metodo)
+    if normales is not None:
+        nx, ny = normales[:, 0], normales[:, 1]
+    else:
+        nx, ny = normales_contacto(df, paredes, metodo)
     tx, ty = -ny, nx
     fn = df['f_norm'].to_numpy(np.float64)
     ft = df['f_tan'].to_numpy(np.float64)
@@ -438,12 +474,13 @@ def fuerzas_contacto(df_particles, df_contacts, dt, paredes=None, metodo='nuevo'
 
 
 def calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r, g=9.8,
-                                          paredes=None):
+                                          paredes=None, normales=None):
     # Fuerza de cada contacto sobre A, con la normal de A hacia B (ver
     # normales_contacto y fuerzas_contacto); la fuerza sobre B es -F_A.
+    # normales: las de Box2D si estan disponibles (leer_normales_box2d).
     # Los contactos contra pared (id < 0, shape NaN) se mantienen: aportan
     # solo al tensor del grano, no se le "inventa" area a la pared.
-    df = fuerzas_contacto(df_particles, df_contacts, dt, paredes=paredes)
+    df = fuerzas_contacto(df_particles, df_contacts, dt, paredes=paredes, normales=normales)
     a_valida = df['a_valida'].to_numpy()
     b_valida = df['b_valida'].to_numpy()
     Fx, Fy = df['Fx_A'].to_numpy(), df['Fy_A'].to_numpy()
@@ -589,8 +626,13 @@ def process_one_jam_task(xy_file, contact_file, jam_id, config_id, dt, r_large_m
         if not arco_path:
             return {"ok": False, "error": "No arco detectado"}
             
+        # Normal real de Box2D si el simulador escribio atasco_contacts_full;
+        # si no (datos viejos), se infiere de la geometria.
+        normales, fuente_normales = leer_normales_box2d(contact_file, df_contacts)
         summary, particulas = calcular_tensor_y_presion_vectorizado(df_particles, df_contacts, arco_path, dt, umbral_r, g=g_abs,
-                                                                    paredes=parse_paredes(xy_file))
+                                                                    paredes=parse_paredes(xy_file),
+                                                                    normales=normales)
+        summary['normales'] = fuente_normales
         
         if pd.notna(sides_large_m):
             forma_grande = nombre_forma(sides_large_m)
