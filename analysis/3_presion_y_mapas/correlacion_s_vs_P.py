@@ -53,10 +53,13 @@ from estilo_figuras import (aplicar_estilo, estilo_sistema, guardar_figura,  # n
 from comparar_presion_por_chi import filtrar_lotes_confirmados, _estadistica_pesada  # noqa: E402
 
 COLUMNA_PRESION = {'P': 'SumP_reducida', 'tau': 'SumTau_reducida'}
-# Presion reducida con la escala Mg/d (fuerza por unidad de longitud en 2D);
-# en las simulaciones M = d = 1, asi que el valor numerico es P/g.
-ETIQUETA_X = {'P': r'Reduced Mean Pressure $\langle P\rangle d / Mg$',
-              'tau': r'Reduced Mean Shear Stress $\langle \tau\rangle d / Mg$'}
+# Presion reducida con la escala mg/d (fuerza por unidad de longitud en 2D),
+# m = masa de un grano grande, d = diametro de un disco grande; en las
+# simulaciones m = d = 1, asi que el valor numerico es P/g.
+# Sufijo para no pisar las figuras con la etiqueta vieja (Mg).
+SUFIJO_NUEVO = '_nuevo'
+ETIQUETA_X = {'P': r'Reduced Mean Pressure $\langle P\rangle d / mg$',
+              'tau': r'Reduced Mean Shear Stress $\langle \tau\rangle d / mg$'}
 ETIQUETA_Y = {'big': r'Mean Avalanche Size $\langle s \rangle$',
               'total': r'Mean Avalanche Size $\langle s \rangle$ (all grains)'}
 COLUMNA_S = {'big': 'tamano_big', 'total': 'total_mix'}
@@ -306,7 +309,7 @@ def main():
         sufijo = '-loglog' if args.logx and args.logy else '-logx' if args.logx else '-logy' if args.logy else ''
     out = args.out or os.path.join(
         rutas.GRAFICOS_FINALES_DIR,
-        f"{nombre}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}{sufijo}.pdf")
+        f"{nombre}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}{sufijo}{SUFIJO_NUEVO}.pdf")
     datos = os.path.splitext(out)[0] + '_datos.csv'
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     cols = ['sistema', 'chi', 'area_ratio_nominal', 'Radio_salida', 'W', 'clave', 'P', 'P_sem', 'n_atascos',
