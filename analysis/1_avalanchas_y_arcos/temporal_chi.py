@@ -209,7 +209,7 @@ def analizar_flujo_temporal(row):
         plt.figure(figsize=(10, 5))
         # referencia: linea negra discontinua, como el chi = 0 de graficos_finales.py
         plt.axhline(y=chi_nominal, **REF_LINE_KW,
-                    label=rf'Nominal $\chi = {chi_nominal:.3g}$')
+                    label=rf'$\chi = {chi_nominal:.3g}$')
         # solo linea (sin simbolos)
         plt.plot(df_plot['tiempo'], df_plot['chi_eff'], '-', color=color, lw=1.2,
                  label=rf'$\chi_{{out}}$ ({WINDOW_SIZE:g} s windows)', zorder=2)

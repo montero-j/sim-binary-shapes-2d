@@ -37,7 +37,8 @@ AR_COL = "area_ratio_nominal"
 RR_COL = "r_ratio_nominal"
 
 # Sufijo de las figuras regeneradas con la notacion nueva de arcos
-# (chi_arch, L_arch, h_arch), para no pisar las versiones anteriores.
+# (chi_arch, L_arch, h_arch) o con etiquetas corregidas, para no pisar
+# las versiones anteriores.
 SUFIJO_NUEVO = "_nuevo"
 
 # SYSTEM_NAME_MAP viene de estilo_figuras.py
@@ -211,12 +212,12 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
         )
 
     plt.xlim(left=0.0)
-    plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
+    plt.xlabel(r"Area Ratio $R_{\rm a}$")
     plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
 
     plt.legend(loc='best')
 
-    save_plot("2-discog-discoc-vs-area-ratio")
+    save_plot("2-discog-discoc-vs-area-ratio" + SUFIJO_NUEVO)
 
 
 def _puntos_de(curvas, n_seg=30):
@@ -762,7 +763,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': r'Arch Aspect Ratio $\langle L_{\rm arch}\rangle/2\langle h_{\rm arch}\rangle$',
+        'Relacion_Aspecto': r'Arch Aspect Ratio $L_{\rm arch}/2h_{\rm arch}$',
         'Tortuosidad': 'Arch Tortuosity',
     }
 
