@@ -36,6 +36,10 @@ CFG = AnalysisConfig()
 AR_COL = "area_ratio_nominal"
 RR_COL = "r_ratio_nominal"
 
+# Sufijo de las figuras regeneradas con la notacion nueva de arcos
+# (chi_arch, L_arch, h_arch), para no pisar las versiones anteriores.
+SUFIJO_NUEVO = "_nuevo"
+
 # SYSTEM_NAME_MAP viene de estilo_figuras.py
 
 # =============================================================================
@@ -605,9 +609,9 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     plt.xlim(0, 0.45)
     
     plt.xlabel(r"Global Concentration $\chi$")
-    plt.ylabel(r"Arch Additive Fraction $\chi_{arch}$")
+    plt.ylabel(r"Arch Additive Fraction $\chi_{\rm arch}$")
     plt.legend(loc='upper left')
-    save_plot("6-arch-composition")
+    save_plot("6-arch-composition" + SUFIJO_NUEVO)
 
     # --- Filtro chi = 0.2 ---
     target_chi = 0.2
@@ -758,7 +762,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': 'Arch Aspect Ratio',
+        'Relacion_Aspecto': r'Arch Aspect Ratio $\langle L_{\rm arch}\rangle/2\langle h_{\rm arch}\rangle$',
         'Tortuosidad': 'Arch Tortuosity',
     }
 
@@ -795,7 +799,8 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(ylabel)
         plt.legend(loc='best')
-        save_plot(f"15-evolution-{metric.lower()}")
+        sufijo = SUFIJO_NUEVO if metric == 'Relacion_Aspecto' else ''
+        save_plot(f"15-evolution-{metric.lower()}{sufijo}")
 
 # =============================================================================
 # MAIN
