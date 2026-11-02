@@ -7,8 +7,8 @@ en punteada), a partir de resumen_presion_por_atasco.csv (el crudo por
 atasco, no el ya agregado por configuracion). Dos magnitudes, en figuras
 separadas:
 
-  - Presion media reducida  <P>/g    -> <out>_<Forma>.pdf
-  - Esfuerzo de corte medio <tau>/g  -> <out>_tau_<Forma>.pdf
+  - Presion media reducida  <P>d/mg    -> <out>_nuevo_<Forma>.pdf
+  - Esfuerzo de corte medio <tau>d/mg  -> <out>_nuevo_tau_<Forma>.pdf
     (tau = radio del circulo de Mohr del tensor de cada particula, la
     parte deviatorica; promedio pesado por area, igual que P)
 
@@ -75,10 +75,15 @@ from estilo_figuras import (aplicar_estilo, estilo_forma, guardar_figura,
 
 REGIONES = ('arco', 'roi')
 
+# Sufijo de las figuras con la presion reducida <P>d/mg (m = masa de un grano
+# grande, d = diametro de un disco grande; en las simulaciones m = d = 1, asi
+# que el valor numerico es P/g)
+SUFIJO_NUEVO = '_nuevo'
+
 # magnitud -> (prefijo de las columnas del csv, etiqueta del eje y, sufijo del archivo)
 MAGNITUDES = {
-    'P':   ('SumP_reducida',   r'Reduced Mean Pressure $\langle P\rangle / g$', ''),
-    'tau': ('SumTau_reducida', r'Reduced Mean Shear Stress $\langle \tau\rangle / g$', '_tau'),
+    'P':   ('SumP_reducida',   r'Reduced Mean Pressure $\langle P\rangle d / mg$', ''),
+    'tau': ('SumTau_reducida', r'Reduced Mean Shear Stress $\langle \tau\rangle d / mg$', '_tau'),
 }
 
 RATIO_REGEX = re.compile(r'Ratio_([0-9]+p[0-9]+)')
@@ -320,6 +325,8 @@ def main():
     print(df_agg[['forma_grande', 'chi', 'n_atascos']].to_string(index=False))
 
     base, ext = os.path.splitext(args.out)
+    # Sufijo para no pisar las figuras con la etiqueta vieja (<P>/g)
+    base = base + SUFIJO_NUEVO
     if os.path.dirname(args.out):
         os.makedirs(os.path.dirname(args.out), exist_ok=True)
     datos_path = f"{base}_datos.csv"

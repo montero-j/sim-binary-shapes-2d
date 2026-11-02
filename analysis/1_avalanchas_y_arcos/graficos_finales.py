@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, List
 
@@ -35,6 +36,11 @@ CFG = AnalysisConfig()
 # Esquema NUEVO de los CSV corregidos.
 AR_COL = "area_ratio_nominal"
 RR_COL = "r_ratio_nominal"
+
+# Sufijo de las figuras regeneradas con la notacion nueva de arcos
+# (chi_arch, L_arch, h_arch) o con etiquetas corregidas, para no pisar
+# las versiones anteriores.
+SUFIJO_NUEVO = "_nuevo"
 
 # SYSTEM_NAME_MAP viene de estilo_figuras.py
 
@@ -207,12 +213,12 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
         )
 
     plt.xlim(left=0.0)
-    plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
+    plt.xlabel(r"Area Ratio $R_{\rm a}$")
     plt.ylabel(r"$\ln(\langle s \rangle + 1)$")
 
     plt.legend(loc='best')
 
-    save_plot("2-discog-discoc-vs-area-ratio")
+    save_plot("2-discog-discoc-vs-area-ratio" + SUFIJO_NUEVO)
 
 
 def plot_disco_vs_area_ratio_norm(df: pd.DataFrame):
@@ -705,9 +711,9 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
     plt.xlim(0, 0.45)
     
     plt.xlabel(r"Global Concentration $\chi$")
-    plt.ylabel(r"Arch Additive Fraction $\chi_{arch}$")
+    plt.ylabel(r"Arch Additive Fraction $\chi_{\rm arch}$")
     plt.legend(loc='upper left')
-    save_plot("6-arch-composition")
+    save_plot("6-arch-composition" + SUFIJO_NUEVO)
 
     plot_arch_composition_B(df_arcos[df_arcos['sistema'].isin(matrix_systems)], matrix_systems)
 
@@ -840,6 +846,38 @@ def aspecto_medio(g, n_boot=500, seed=0):
     return {'mean': valor, 'sem': float(np.std(boot, ddof=1)), 'count': n}
 
 
+W_REGEX = re.compile(r'_W_([0-9]+(?:p[0-9]+)?)')
+
+
+def _w_de_path(path) -> float:
+    """Ancho/radio de salida del nombre de carpeta (..._W_2p0 -> 2.0); NaN si no esta."""
+    m = W_REGEX.search(str(path))
+    return float(m.group(1).replace('p', '.')) if m else np.nan
+
+
+def puros_como_mezcla(df_arcos: pd.DataFrame, df_mezclas: pd.DataFrame, sistemas: List[str]) -> pd.DataFrame:
+    """Arcos de los sistemas puros (chi = 0) renombrados como la mezcla con el
+    mismo grano grande ('Tri(G)' -> 'Tri(G)-Disco(C)'), para graficarlos como
+    el punto chi = 0 de esa curva. Si el csv trae 'path', solo se usan los
+    puros con el mismo orificio (_W_ de la carpeta) que las mezclas de ese
+    sistema, por si hay puros de barridos de orificio."""
+    partes = []
+    for sis in sistemas:
+        base = sis.split('-')[0]
+        p = df_arcos[(df_arcos['sistema'] == base) & np.isclose(df_arcos['chi'].astype(float), 0.0)]
+        if p.empty:
+            print(f"  [!] Sin arcos del sistema puro {base} para el punto chi = 0 de {sis}.")
+            continue
+        if 'path' in df_arcos.columns:
+            w_mezcla = df_mezclas.loc[df_mezclas['sistema'] == sis, 'path'].map(_w_de_path).dropna().unique()
+            if len(w_mezcla):
+                p = p[p['path'].map(_w_de_path).isin(w_mezcla)]
+        print(f"  -> {sis}: {len(p)} arcos del sistema puro {base} como punto chi = 0")
+        if not p.empty:
+            partes.append(p.assign(sistema=sis))
+    return pd.concat(partes, ignore_index=True) if partes else df_arcos.iloc[0:0]
+
+
 def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     """Gráfico 15: evolución de relación de aspecto y tortuosidad vs chi."""
     if not os.path.exists(CFG.arcos_path):
@@ -856,11 +894,17 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
         system_col='sistema',
     )
     
+    # Sistemas puros (chi = 0) como primer punto de cada mezcla. En el csv de
+    # arcos los puros se llaman 'Disco(G)', 'Tri(G)', ... y tienen
+    # area_ratio_nominal = 1.0, asi que filter_standard_size los descarta.
+    df_filtered = pd.concat([df_filtered, puros_como_mezcla(df_arcos, df_filtered, matrix_systems)],
+                            ignore_index=True)
+
     # Filtrar para conservar solo los valores de chi de 0 a 0.4
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': 'Arch Aspect Ratio',
+        'Relacion_Aspecto': r'Arch Aspect Ratio $L_{\rm arch}/2h_{\rm arch}$',
         'Tortuosidad': 'Arch Tortuosity',
     }
 
@@ -892,12 +936,13 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
             )
 
         # Fijar explícitamente los límites del eje x de 0 a 0.4
-        plt.xlim(0, 0.45)
+        plt.xlim(-0.01, 0.45)  # margen para que el punto chi = 0 no quede cortado
         
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(ylabel)
         plt.legend(loc='best')
-        save_plot(f"15-evolution-{metric.lower()}")
+        # Las dos figuras 15 ahora incluyen chi = 0: sufijo para no pisar las viejas
+        save_plot(f"15-evolution-{metric.lower()}{SUFIJO_NUEVO}")
 
 # =============================================================================
 # MAIN
