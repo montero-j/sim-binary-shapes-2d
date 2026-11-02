@@ -261,7 +261,12 @@ def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--csv', required=True, help='resumen_presion_por_atasco.csv')
+    parser.add_argument('--csv', default=None, help='resumen_presion_por_atasco.csv')
+    parser.add_argument('--datos', default=None,
+                        help='<out>_datos.csv de una corrida anterior (valores ya agregados por '
+                             'forma y chi): grafica desde ahi sin necesitar --csv. --ratio no se '
+                             'aplica (el archivo ya tiene una sola razon de areas); --formas, '
+                             '--chi_min y --chi_max si.')
     parser.add_argument('--out', default='comparacion_chi.pdf',
                         help='nombre base; la extension define el formato (default pdf, '
                              'como graficos_finales.py)')
@@ -301,25 +306,37 @@ def main():
 
     magnitudes = ['P', 'tau'] if args.magnitud == 'ambas' else [args.magnitud]
 
-    df = pd.read_csv(args.csv, dtype={'lote': str, 'jam_id': str})
-    df = filtrar_lotes_confirmados(df, args.csv)
-    df['ratio_area'] = df['sim_path'].apply(extraer_ratio_area)
-    df = df[np.isclose(df['ratio_area'], args.ratio, atol=1e-3)]
-    if df.empty:
-        raise SystemExit(f"No quedo ninguna fila con ratio_area ~= {args.ratio} — revisa --ratio.")
-    print(f"Razon de areas = {args.ratio}: {df['sim_path'].nunique()} carpetas distintas incluidas "
-          f"({df['config_id'].nunique()} config_id distintos).")
+    if (args.csv is None) == (args.datos is None):
+        parser.error("hay que pasar --csv (resumen por atasco) o --datos (valores ya agregados), uno solo.")
+
+    if args.datos is not None:
+        # Valores ya agregados (media, std, sem, n por forma, chi, region y especie)
+        df = pd.read_csv(args.datos)
+        faltan = [f'mean_{m}_{r}_{t}' for m in magnitudes for r in REGIONES for t in ('B', 'S')
+                  if f'mean_{m}_{r}_{t}' not in df.columns]
+        if faltan:
+            raise SystemExit(f"A {args.datos} le faltan las columnas {faltan} — revisa --magnitud.")
+        print(f"Graficando desde valores ya agregados: {args.datos} (--ratio no se aplica).")
+    else:
+        df = pd.read_csv(args.csv, dtype={'lote': str, 'jam_id': str})
+        df = filtrar_lotes_confirmados(df, args.csv)
+        df['ratio_area'] = df['sim_path'].apply(extraer_ratio_area)
+        df = df[np.isclose(df['ratio_area'], args.ratio, atol=1e-3)]
+        if df.empty:
+            raise SystemExit(f"No quedo ninguna fila con ratio_area ~= {args.ratio} — revisa --ratio.")
+        print(f"Razon de areas = {args.ratio}: {df['sim_path'].nunique()} carpetas distintas incluidas "
+              f"({df['config_id'].nunique()} config_id distintos).")
 
     if args.formas is not None:
         df = df[df['forma_grande'].isin(args.formas)]
     if args.chi_min is not None:
         df = df[df['chi'] >= args.chi_min]
     if args.chi_max is not None:
-        df = df[df['chi'] <= args.chi_max]
+        df = df[df['chi'] <= args.chi_max + 1e-9]
     if df.empty:
         raise SystemExit("No quedaron filas despues de filtrar — revisa --formas/--chi_min/--chi_max.")
 
-    df_agg = agregar_por_forma_y_chi(df, magnitudes)
+    df_agg = df.reset_index(drop=True) if args.datos is not None else agregar_por_forma_y_chi(df, magnitudes)
     formas = args.formas if args.formas is not None else sorted(df_agg['forma_grande'].dropna().unique())
     print("Atascos por forma y chi:")
     print(df_agg[['forma_grande', 'chi', 'n_atascos']].to_string(index=False))
