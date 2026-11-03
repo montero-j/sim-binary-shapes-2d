@@ -67,19 +67,15 @@ def area_grano(radio, n_lados):
 
 
 def especie_chica(areas_unitarias):
-    """Indice de la especie aditivo (la 'chica'): la de menor AREA de grano.
-    No se usa el radio: en los poligonos es el circunscrito, y un cuadrado
-    con el 80 % del area de un disco tiene radio mayor (0.56 > 0.5), lo que
-    invertia las especies en Disco-Cuad / Disco-Tri con R_a = 0.8. Si las
-    areas son iguales (R_a = 1, ej. Disco-Disco) se toma el tipo 1: el aditivo
-    va siempre en la segunda linea de granos del params.in (sweep_mixure.sh).
-    Antes, con radios iguales, argmin daba el tipo 0 y chi_out salia 1 - chi."""
-    tipos = sorted(areas_unitarias)
-    a_min = min(areas_unitarias.values())
-    empatados = [t for t in tipos if np.isclose(areas_unitarias[t], a_min, rtol=1e-6)]
-    if len(empatados) > 1:
-        return 1 if 1 in empatados else empatados[-1]
-    return empatados[0]
+    """Indice de la especie aditivo: el tipo 1, la segunda linea de granos del
+    params.in (asi la escriben sweep_mixure.sh y run_slurm_cluster_utn.sh).
+    No se decide por tamaño: con radios iguales (Disco-Disco, R_a = 1) argmin
+    daba el tipo 0, y por area tampoco sirve porque el script del cluster
+    calcula el area del poligono con el radio como apotema mientras Box2D lo
+    usa como radio circunscrito, asi que el 'chico' puede tener mas area que
+    el grande (ej. Pent-Disco R_a = 0.8: disco 0.727 > pentagono 0.594). En
+    esos casos chi_out salia 1 - chi."""
+    return 1 if 1 in areas_unitarias else min(areas_unitarias)
 
 
 def calcular_chi_temporal(row):
