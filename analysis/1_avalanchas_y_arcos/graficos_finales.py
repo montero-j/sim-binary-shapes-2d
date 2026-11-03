@@ -685,35 +685,8 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
         print("  [!] No hay datos de arcos para el filtro estándar de tamaño.")
         return
 
-    # --- Plot 6: Composición ---
-    # Filtrar el DataFrame para conservar solo los valores de chi entre 0 y 0.4
-    df_filtered = df_mix[(df_mix['chi'] >= 0) & (df_mix['chi'] <= 0.4)].copy()
-    
-    df_filtered['frac_arco'] = df_filtered['Particulas_Tipo_1'] / df_filtered['Total_Particulas_Arco']
-    plt.figure()
-    for sys_name in matrix_systems:
-        group = df_filtered[df_filtered['sistema'] == sys_name]
-        if group.empty:
-            continue
-        grp = group.groupby('chi')['frac_arco'].agg(['mean', 'std', 'count']).reset_index()
-        grp['sem'] = grp['std'] / np.sqrt(grp['count'])
-        color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
-        plt.errorbar(
-            grp['chi'], grp['mean'], yerr=grp['sem'],
-            fmt=f'{marker}-', color=color,
-            label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
-        )
-
-    # Ajustar la línea de referencia homogénea para que vaya de 0 a 0.4
-    plt.plot([0, 0.5], [0, 0.5], **REF_LINE_KW, label='Homogeneous')
-    
-    # Opcional: fijar explícitamente los límites del eje x
-    plt.xlim(0, 0.45)
-    
-    plt.xlabel(r"Global Concentration $\chi$")
-    plt.ylabel(r"Arch Additive Fraction $\chi_{\rm arch}$")
-    plt.legend(loc='upper left')
-    save_plot("6-arch-composition" + SUFIJO_NUEVO)
+    # --- Plot 6: Composición (fraccion numerica y fraccion masica) ---
+    plot_arch_composition(df_arcos, matrix_systems)
 
     plot_arch_composition_B(df_arcos[df_arcos['sistema'].isin(matrix_systems)], matrix_systems)
 
@@ -764,6 +737,77 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
             plt.yscale('log')
             plt.ylabel(r"Avalanche Size $s$")
             save_plot(f"10-avalanche-boxplot-chi-{target_chi}")
+
+
+# R_a de la figura de composicion: el mismo para todos los sistemas, asi la
+# curva de referencia n_S(chi; R_a) es una sola (la composicion depende mucho de R_a).
+AR_COMPOSICION = 0.1
+AR_COMPOSICION_TOL = 0.02
+
+
+def n_s_homogeneo(chi, r_a):
+    """Fraccion numerica de chicos en una mezcla homogenea de fraccion masica
+    chi, con m_S = R_a m (misma densidad): n_S = (chi/R_a) / (chi/R_a + 1 - chi)."""
+    chi = np.asarray(chi, dtype=float)
+    return (chi / r_a) / (chi / r_a + 1.0 - chi)
+
+
+def plot_arch_composition(df_arcos: pd.DataFrame, sistemas: List[str]):
+    """Fig 6 en dos versiones (antes graficaba la fraccion numerica del arco
+    contra la recta y = x, que no es la referencia de una fraccion numerica):
+      6-arch-composition-number: x_S^arch = N_S/(N_S+N_L) en el arco, con la
+          curva homogenea n_S(chi; R_a).
+      6-arch-composition-mass:   chi_arch = R_a N_S/(R_a N_S + N_L), fraccion
+          masica de chicos en el arco, con la recta homogenea chi_arch = chi.
+    Ambas con R_a = AR_COMPOSICION para todos los sistemas, chi en (0, 0.4]."""
+    df = df_arcos[df_arcos['sistema'].isin(sistemas) & (df_arcos['chi'] > 0) & (df_arcos['chi'] <= 0.4)].copy()
+    ra = df[AR_COL].astype(float)
+    print("  -> Composicion de arcos: R_a nominal presentes por sistema (chi > 0):")
+    for sis in sistemas:
+        vals = sorted(float(v) for v in ra[df["sistema"] == sis].round(3).unique())
+        if vals:
+            print(f"     {sis}: {vals}")
+    df = df[np.isclose(ra, AR_COMPOSICION, atol=AR_COMPOSICION_TOL)]
+    df = df[df['Total_Particulas_Arco'] > 0]
+    if df.empty:
+        print(f"  [!] Sin arcos con R_a ~ {AR_COMPOSICION}.")
+        return
+    r = df[AR_COL].astype(float)
+    n_s, n_l = df['Particulas_Tipo_1'].astype(float), df['Particulas_Tipo_0'].astype(float)
+    df['frac_num'] = n_s / (n_s + n_l)
+    df['frac_masa'] = r * n_s / (r * n_s + n_l)
+
+    chi_ref = np.linspace(0.0, 0.45, 200)
+    versiones = [
+        ('frac_num', r"Arch Number Fraction of Small Disks $x_{\rm S}^{\rm arch}$",
+         n_s_homogeneo(chi_ref, AR_COMPOSICION), rf"Homogeneous, $n_{{\rm S}}(\chi)$", "6-arch-composition-number"),
+        ('frac_masa', r"Arch Mass Fraction of Small Disks $\chi_{\rm arch}$",
+         chi_ref, r"Homogeneous, $\chi_{\rm arch} = \chi$", "6-arch-composition-mass"),
+    ]
+    for col, ylabel, y_ref, label_ref, nombre in versiones:
+        plt.figure()
+        plt.plot(chi_ref, y_ref, **REF_LINE_KW, label=label_ref)
+        for sis in sistemas:
+            g = df[df['sistema'] == sis]
+            if g.empty:
+                continue
+            grp = g.groupby('chi')[col].agg(['mean', 'std', 'count']).reset_index()
+            grp['sem'] = grp['std'] / np.sqrt(grp['count'])
+            color, marker = CFG.system_style.get(sis, ('black', 'o'))
+            plt.errorbar(grp['chi'], grp['mean'], yerr=grp['sem'], fmt=f'{marker}-', color=color,
+                         label=CFG.english_labels.get(sis, sis), **ERRORBAR_KW)
+            if col == 'frac_num':
+                fila = grp.iloc[(grp['chi'] - 0.2).abs().argmin()]
+                print(f"     {sis}: chi = {fila['chi']:.3g} -> x_S^arch = {fila['mean']:.3f} "
+                      f"(n_S = {n_s_homogeneo(fila['chi'], AR_COMPOSICION):.3f}), "
+                      f"chi_arch = {g[np.isclose(g['chi'], fila['chi'])]['frac_masa'].mean():.4f}")
+        plt.xlim(0, 0.45)
+        if col == 'frac_num':
+            plt.ylim(0, 1)
+        plt.xlabel(r"Concentration $\chi$")
+        plt.ylabel(ylabel)
+        plt.legend(loc='upper left')
+        save_plot(nombre + SUFIJO_NUEVO)
 
 
 def plot_arch_geometry_deep_dive(df_stats: pd.DataFrame):
