@@ -270,11 +270,27 @@ def main():
                     help='<s> en el eje x (variable independiente) y la presion en el eje y; '
                          '--logy sigue siendo <s> logaritmico')
     ap.add_argument('--sin_error', action='store_true', help='sin barras de error')
+    ap.add_argument('--datos', default=None,
+                    help='<figura>_datos.csv de una corrida anterior (un punto por sistema y chi, '
+                         'columnas sistema, chi, P, P_sem, s, s_sem): grafica desde ahi sin '
+                         'necesitar --presion/--av/--idx. Se aplica --chi_max.')
     ap.add_argument('--out', default=None,
                     help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>-W-<W>.pdf)')
     args = ap.parse_args()
     if args.loglog:
         args.logx = args.logy = True
+
+    if args.datos is not None:
+        df = pd.read_csv(args.datos)
+        faltan = [c for c in ('sistema', 'chi', 'P', 'P_sem', 's', 's_sem') if c not in df.columns]
+        if faltan:
+            sys.exit(f"[!] A {args.datos} le faltan las columnas {faltan}")
+        df = df[df['chi'] <= args.chi_max + 1e-9].dropna(subset=['P', 's'])
+        print(f"Graficando desde {args.datos}: {len(df)} puntos.")
+        for col in ('Radio_salida', 'W'):
+            if col not in df.columns:
+                df[col] = np.nan
+        return _salida(df, args)
 
     pres = presion_por_simulacion(args.presion, args.magnitud, args.region)
     aval = avalanchas_por_simulacion(args.av, args.idx, COLUMNA_S[args.s], args.solo_con_arco)
@@ -299,6 +315,11 @@ def main():
     if df.empty:
         sys.exit("[!] No quedo ninguna simulacion despues de filtrar (--W, --area_ratio, --radio_salida, --chi_max).")
     df['sistema'] = df['system_type'].map(lambda s: SYSTEM_NAME_MAP.get(str(s), str(s)))
+    _salida(df, args)
+
+
+def _salida(df, args):
+    """Nombre de salida, csv con los puntos, Pearson por pantalla y figura."""
 
     if args.s_en_x:
         nombre = f"16-{args.magnitud}-vs-s"
