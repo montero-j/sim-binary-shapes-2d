@@ -76,7 +76,7 @@ def tau_integrado(rho):
 def analizar(df_av, min_bloques):
     filas, curvas = [], {}
     for h, g in df_av.groupby('sim_hash'):
-        x = g.sort_values('t_inicio')['tamano_big'].to_numpy(float)
+        x = g.sort_values('t_inicio', kind='stable')['tamano_big'].to_numpy(float)
         if len(x) < 2 * min_bloques:
             continue
         bl = sem_por_bloques(x, min_bloques)
@@ -131,9 +131,15 @@ def main():
     args = ap.parse_args()
 
     av = pd.read_csv(args.av)
-    faltan = [c for c in ('sim_hash', 't_inicio', 'tamano_big') if c not in av.columns]
+    faltan = [c for c in ('sim_hash', 'tamano_big') if c not in av.columns]
     if faltan:
         sys.exit(f"[!] A {args.av} le faltan las columnas {faltan}")
+    if 't_inicio' not in av.columns:
+        # csv de una version anterior de processor.py: las avalanchas de cada
+        # simulacion se escriben en el orden en que ocurren (rachas de flx.dat),
+        # asi que el orden de las filas dentro de cada sim_hash es el temporal.
+        print("[aviso] el csv no tiene t_inicio: se usa el orden de las filas dentro de cada simulacion.")
+        av['t_inicio'] = av.groupby('sim_hash').cumcount().astype(float)
     idx = pd.read_csv(args.index)
     meta = [c for c in ('sim_hash', 'system_type', 'chi', 'area_ratio_nominal') if c in idx.columns]
     av = av.drop(columns=[c for c in meta if c != 'sim_hash' and c in av.columns]).merge(
