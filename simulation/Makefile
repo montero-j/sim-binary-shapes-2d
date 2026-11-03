@@ -26,7 +26,8 @@ LIBS     = -lbox2d -lgsl -lgslcblas -lm
 
 # --- Archivos ---
 # Busca automáticamente todos los .cpp dentro de la carpeta src
-SRCS = $(wildcard $(SRC_DIR)/*.cpp)
+SRCS = $(filter-out $(SRC_DIR)/save_tensors.cpp, $(wildcard $(SRC_DIR)/*.cpp))
+# save_tensors.cpp: fragmento suelto (sin includes) que no llama nadie; no compila solo
 
 # Convierte la lista de sources (src/%.cpp) en objetos (obj/%.o)
 OBJS = $(patsubst $(SRC_DIR)/%.cpp, $(OBJ_DIR)/%.o, $(SRCS))
