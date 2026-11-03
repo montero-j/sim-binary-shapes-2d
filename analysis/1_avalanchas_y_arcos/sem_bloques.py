@@ -153,6 +153,16 @@ def main():
     if av.empty:
         sys.exit("[!] No quedaron avalanchas despues de filtrar (--sistema / --area_ratio / --chi).")
 
+    # La misma simulacion puede estar indexada con dos sim_hash (misma carpeta
+    # en dos rutas): se deja una sola por secuencia de avalanchas identica.
+    firmas = av.sort_values(['sim_hash', 't_inicio'], kind='stable').groupby('sim_hash')['tamano_big'] \
+               .apply(lambda x: hash(tuple(x)))
+    dup = firmas[firmas.duplicated()].index
+    if len(dup):
+        print(f"[aviso] {len(dup)} sim_hash con la misma secuencia de avalanchas que otro (duplicados "
+              f"en el indice): se cuentan una sola vez: {', '.join(dup)}")
+        av = av[~av['sim_hash'].isin(dup)]
+
     res, curvas = analizar(av, args.min_bloques)
     if res.empty:
         sys.exit(f"[!] Ninguna simulacion tiene al menos {2 * args.min_bloques} avalanchas.")
