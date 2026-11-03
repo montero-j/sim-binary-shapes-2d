@@ -98,6 +98,22 @@ def analizar(df_av, min_bloques):
     return pd.DataFrame(filas), curvas
 
 
+def imprimir_tabla(res, curvas):
+    """Una fila por simulacion: chi, <s>, SEM(b) para cada b usado, rho_1, tau_int."""
+    bs = sorted({t[0] for bl in curvas.values() for t in bl})
+    filas = []
+    for _, f in res.sort_values(['system_type', 'chi']).iterrows():
+        sem = {t[0]: t[2] for t in curvas[f['sim_hash']]}
+        fila = {'sistema': f['system_type'], 'chi': f'{f["chi"]:g}', '<s>': f'{f["s_medio"]:.1f}'}
+        fila.update({f'SEM(b={b})': (f'{sem[b]:.2f}' if b in sem else '-') for b in bs})
+        fila.update({'rho_1': f'{f["rho1"]:+.3f}', 'tau_int': f'{f["tau_int"]:.2f}'})
+        filas.append(fila)
+    tabla = pd.DataFrame(filas)
+    if tabla['sistema'].nunique() == 1:
+        tabla = tabla.drop(columns='sistema')
+    print(tabla.to_string(index=False))
+
+
 def graficar_resumen(res, out):
     """Dos paneles, un punto por simulacion en funcion de chi, con la banda de
     ruido esperada si las avalanchas son independientes:
@@ -163,6 +179,8 @@ def main():
     ap.add_argument('--chi', type=float, nargs='+', default=None)
     ap.add_argument('--min_bloques', type=int, default=16,
                     help='minimo de bloques para usar un tamaño de bloque (default 16)')
+    ap.add_argument('--tabla', action='store_true',
+                    help='solo imprime la tabla (SEM para cada tamaño de bloque); no guarda nada')
     ap.add_argument('--curvas', action='store_true',
                     help='ademas, la figura SEM(b)/SEM(1) vs b con una curva por simulacion')
     ap.add_argument('--etiqueta', default=None, help='sufijo de los archivos de salida')
@@ -177,7 +195,8 @@ def main():
         # csv de una version anterior de processor.py: las avalanchas de cada
         # simulacion se escriben en el orden en que ocurren (rachas de flx.dat),
         # asi que el orden de las filas dentro de cada sim_hash es el temporal.
-        print("[aviso] el csv no tiene t_inicio: se usa el orden de las filas dentro de cada simulacion.")
+        if not args.tabla:
+            print("[aviso] el csv no tiene t_inicio: se usa el orden de las filas dentro de cada simulacion.")
         av['t_inicio'] = av.groupby('sim_hash').cumcount().astype(float)
     idx = pd.read_csv(args.index)
     meta = [c for c in ('sim_hash', 'system_type', 'chi', 'area_ratio_nominal') if c in idx.columns]
@@ -198,13 +217,17 @@ def main():
                .apply(lambda x: hash(tuple(x)))
     dup = firmas[firmas.duplicated()].index
     if len(dup):
-        print(f"[aviso] {len(dup)} sim_hash con la misma secuencia de avalanchas que otro (duplicados "
+        if not args.tabla:
+          print(f"[aviso] {len(dup)} sim_hash con la misma secuencia de avalanchas que otro (duplicados "
               f"en el indice): se cuentan una sola vez: {', '.join(dup)}")
         av = av[~av['sim_hash'].isin(dup)]
 
     res, curvas = analizar(av, args.min_bloques)
     if res.empty:
         sys.exit(f"[!] Ninguna simulacion tiene al menos {2 * args.min_bloques} avalanchas.")
+    if args.tabla:
+        imprimir_tabla(res, curvas)
+        return
     etiqueta = args.etiqueta or '_'.join(filter(None, [
         '-'.join(args.sistema) if args.sistema else 'todos',
         f"Ra{'-'.join(f'{r:g}' for r in args.area_ratio)}" if args.area_ratio else None]))
