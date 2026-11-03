@@ -99,14 +99,14 @@ def analizar(df_av, min_bloques):
 
 
 def imprimir_tabla(res, curvas):
-    """Una fila por simulacion: chi, <s>, SEM(b) para cada b usado, rho_1, tau_int."""
+    """Una fila por simulacion: chi, <s>, SEM(b) para cada b usado, rho_1."""
     bs = sorted({t[0] for bl in curvas.values() for t in bl})
     filas = []
     for _, f in res.sort_values(['system_type', 'chi']).iterrows():
         sem = {t[0]: t[2] for t in curvas[f['sim_hash']]}
         fila = {'sistema': f['system_type'], 'chi': f'{f["chi"]:g}', '<s>': f'{f["s_medio"]:.1f}'}
         fila.update({f'SEM(b={b})': (f'{sem[b]:.2f}' if b in sem else '-') for b in bs})
-        fila.update({'rho_1': f'{f["rho1"]:+.3f}', 'tau_int': f'{f["tau_int"]:.2f}'})
+        fila['rho_1'] = f'{f["rho1"]:+.3f}'
         filas.append(fila)
     tabla = pd.DataFrame(filas)
     if tabla['sistema'].nunique() == 1:
