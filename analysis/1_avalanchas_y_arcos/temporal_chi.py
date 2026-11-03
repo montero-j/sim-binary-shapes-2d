@@ -66,6 +66,22 @@ def area_grano(radio, n_lados):
     return 0.5 * n * radio ** 2 * np.sin(2 * np.pi / n)
 
 
+def especie_chica(areas_unitarias):
+    """Indice de la especie aditivo (la 'chica'): la de menor AREA de grano.
+    No se usa el radio: en los poligonos es el circunscrito, y un cuadrado
+    con el 80 % del area de un disco tiene radio mayor (0.56 > 0.5), lo que
+    invertia las especies en Disco-Cuad / Disco-Tri con R_a = 0.8. Si las
+    areas son iguales (R_a = 1, ej. Disco-Disco) se toma el tipo 1: el aditivo
+    va siempre en la segunda linea de granos del params.in (sweep_mixure.sh).
+    Antes, con radios iguales, argmin daba el tipo 0 y chi_out salia 1 - chi."""
+    tipos = sorted(areas_unitarias)
+    a_min = min(areas_unitarias.values())
+    empatados = [t for t in tipos if np.isclose(areas_unitarias[t], a_min, rtol=1e-6)]
+    if len(empatados) > 1:
+        return 1 if 1 in empatados else empatados[-1]
+    return empatados[0]
+
+
 def calcular_chi_temporal(row):
     """
     chi de salida (fraccion de area de chicos) por ventana de WINDOW_SIZE s.
@@ -106,7 +122,7 @@ def calcular_chi_temporal(row):
     # los discos pi r^2. Antes se usaba pi r^2 para todos, lo que sesgaba
     # chi_out en mezclas de formas distintas (ej. cuadrado-disco).
     areas_unitarias = {i: area_grano(g['radius'], g.get('sides', 1)) for i, g in enumerate(grain_info)}
-    tipo_chica = int(np.argmin(radios))
+    tipo_chica = especie_chica(areas_unitarias)
 
     flux_path = os.path.join(path, flux_filename)
     if not os.path.exists(flux_path):
