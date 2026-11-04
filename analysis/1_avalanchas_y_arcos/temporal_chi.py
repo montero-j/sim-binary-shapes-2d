@@ -55,27 +55,6 @@ PREFIJO_NUEVO = None
 # Intervalo de tiempo a analizar (s); None = desde el principio / hasta el final
 T_MIN = None
 T_MAX = None
-# Si es True, chi de referencia = fraccion de area de chicos del params.in
-# (cantidades y radios reales) en lugar del chi del indice / nombre de carpeta
-CHI_REAL = False
-
-
-def chi_desde_params(path):
-    """Fraccion de area del aditivo (tipo 1) segun las lineas de granos del
-    params.in: N, radio, nLados, ... ; None si no se puede leer."""
-    try:
-        lineas = []
-        with open(os.path.join(path, 'params.in')) as f:
-            for l in f:
-                c = l.split()
-                if len(c) == 6 and c[0].isdigit():
-                    lineas.append((int(c[0]), float(c[1]), int(c[2])))
-        if len(lineas) < 2:
-            return None
-        areas = [n * area_grano(r, lados) for n, r, lados in lineas]
-        return areas[1] / sum(areas)
-    except (OSError, ValueError):
-        return None
 
 
 def area_grano(radio, n_lados):
@@ -127,10 +106,6 @@ def calcular_chi_temporal(row):
     # 'chi' ya es la concentración objetivo del diseño experimental
     # (confirmado: a r_ratio_nominal fijo, 'chi' es la variable barrida).
     chi_nominal = row['chi']
-    if CHI_REAL:
-        c = chi_desde_params(path)
-        if c is not None:
-            chi_nominal = c
 
     if len(grain_info) < 2:
         # Sistema monodisperso (sin aditivo): no hay dos poblaciones que
@@ -335,11 +310,10 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
     print(f"Figura: {out if os.path.splitext(out)[1] else out + '.' + FORMATO}")
 
 
-def _inicializar_worker(viejo, nuevo, ventana, formato, t_min=None, t_max=None, chi_real=False):
+def _inicializar_worker(viejo, nuevo, ventana, formato, t_min=None, t_max=None):
     # los workers no heredan lo que main() cambia despues de importar el
     # modulo (con 'spawn' seguro, con 'fork' depende): se pasa explicito
-    global PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO, T_MIN, T_MAX, CHI_REAL
-    CHI_REAL = chi_real
+    global PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO, T_MIN, T_MAX
     PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO = viejo, nuevo, ventana, formato
     T_MIN, T_MAX = t_min, t_max
 
@@ -381,9 +355,6 @@ def main():
                         help="figura comparativa con chi_out / chi nominal (referencia en 1)")
     parser.add_argument('--t_min', type=float, default=None,
                         help="inicio del intervalo de tiempo (s); vale para todos los modos")
-    parser.add_argument('--chi_real', action='store_true',
-                        help="chi de referencia calculado del params.in (cantidades y radios reales) en vez del "
-                             "chi del indice; necesario si el nombre de la carpeta no coincide con la mezcla")
     parser.add_argument('--t_max', type=float, default=None,
                         help="fin del intervalo de tiempo (s); vale para todos los modos")
     parser.add_argument('--out', default=os.path.join(rutas.GRAFICOS_FINALES_DIR, 'chi_temporal_comparacion'),
@@ -423,8 +394,7 @@ def main():
         if df_idx.empty:
             raise SystemExit("Ninguna simulacion coincide con --incluir.")
     # este proceso tambien usa las opciones (figura comparativa)
-    _inicializar_worker(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato, args.t_min, args.t_max,
-                        args.chi_real)
+    _inicializar_worker(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato, args.t_min, args.t_max)
     if args.sistema:
         df_idx = df_idx[df_idx['system_type'].isin(args.sistema)]
     if args.chi:
@@ -447,7 +417,7 @@ def main():
         tasks = [row for _, row in df_idx.iterrows()]
         with Pool(args.workers, initializer=_inicializar_worker,
                   initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato,
-                            args.t_min, args.t_max, args.chi_real)) as p:
+                            args.t_min, args.t_max)) as p:
             res = p.map(_segregacion_fila, tasks)
         r = pd.DataFrame([x for x in res if x is not None])
         if r.empty:
@@ -472,7 +442,7 @@ def main():
     tasks = [row for _, row in df_idx.iterrows()]
     with Pool(args.workers, initializer=_inicializar_worker,
               initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato,
-                            args.t_min, args.t_max, args.chi_real)) as p:
+                            args.t_min, args.t_max)) as p:
         resultados = p.map(analizar_flujo_temporal, tasks)
 
     conteo = Counter(r['status'] for r in resultados)
