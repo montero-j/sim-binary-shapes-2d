@@ -221,6 +221,69 @@ def plot_disco_vs_area_ratio(df: pd.DataFrame):
     save_plot("2-discog-discoc-vs-area-ratio" + SUFIJO_NUEVO)
 
 
+def plot_disco_vs_area_ratio_norm(df: pd.DataFrame):
+    """Variante de la figura 2: <s>/<s>_0 (sistema puro de discos, mismo
+    orificio) en escala logaritmica, con la referencia en 1, en lugar de
+    ln(<s> + 1). Error: S_sem / <s>_0 (el del puro no se propaga, como en
+    las figuras normalizadas)."""
+    print("  -> Plotting 2B: Disco(G)-Disco(C) vs Area Ratio, <s>/<s>_0 en log...")
+
+    df_sys = df[df['sistema'] == 'Disco(G)-Disco(C)'].copy()
+    if df_sys.empty:
+        return
+
+    main_dd = df_sys['D_d_sq'].value_counts().idxmax()
+    df_sys = df_sys[df_sys['D_d_sq'] == main_dd]
+
+    s0, _ = get_pure_ref(df, 'Disco(G)-Disco(C)', main_dd, 'S_mean')
+    if s0 is None:
+        print("     [!] sin sistema puro de discos: no se puede normalizar")
+        return
+    print(f"     <s>_0 = {s0:.2f}; <s> minimo en todo el csv = {df['S_mean'].min():.2f}, "
+          f"en discos-discos = {df_sys['S_mean'].min():.2f}")
+
+    plt.figure()
+    plt.axhline(y=1.0, **REF_LINE_KW, label=r'$\chi = 0$ (Pure)')
+
+    target_chis = [0.01, 0.1, 0.14, 0.2]
+    colors, markers = SEQ_STYLE(len(target_chis))
+
+    for chi, color, marker in zip(target_chis, colors, markers):
+        grp = df_sys[np.isclose(df_sys['chi'], chi, atol=0.005)].sort_values(AR_COL)
+        if grp.empty:
+            continue
+
+        plot_data = (
+            grp.groupby(AR_COL, dropna=False)
+               .agg(S_mean=('S_mean', 'mean'), S_sem=('S_sem', 'mean'))
+               .reset_index()
+               .sort_values(AR_COL)
+        )
+
+        plt.errorbar(
+            plot_data[AR_COL], plot_data['S_mean'] / s0, yerr=plot_data['S_sem'] / s0,
+            fmt=f'{marker}-', color=color, label=rf'$\chi = {chi}$',
+            **ERRORBAR_KW,
+        )
+
+    plt.yscale('log')
+    # Etiquetas en numeros comunes y separadas (antes salian todas las de
+    # 0.6, 0.7, 0.8, 0.9 pegadas); las demas marcas quedan sin numero.
+    ax = plt.gca()
+    lo, hi = ax.get_ylim()
+    ticks = [t for t in (0.2, 0.3, 0.5, 0.7, 1, 2, 3, 5, 7, 10, 20, 30, 50) if lo <= t <= hi]
+    ax.yaxis.set_major_locator(plt.FixedLocator(ticks))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.yaxis.set_minor_formatter(plt.NullFormatter())
+    plt.xlim(left=0.0)
+    plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
+    plt.ylabel(r"$\langle s \rangle / \langle s \rangle_0$")
+
+    plt.legend(loc='best')
+
+    save_plot("2-discog-discoc-vs-area-ratio_B")
+
+
 def _puntos_de(curvas, n_seg=30):
     """Puntos de las curvas (R_a, x, y, err): los datos, los extremos de las
     barras de error y puntos intermedios sobre las lineas que los unen."""
@@ -568,6 +631,43 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
 # GRÁFICOS DE ARCOS
 # =============================================================================
 
+def plot_arch_composition_B(df_arcos: pd.DataFrame, matrix_systems: List[str], ar_comp: float = 0.1):
+    """Variante de la Fig 6 (6-arch-composition_B): fraccion en NUMERO de
+    granos chicos en el arco, todas las curvas con el mismo R_a, y la
+    referencia de mezcla homogenea en numero. chi es fraccion de AREA:
+        n_S = (chi/R_a) / (chi/R_a + 1 - chi) = chi / (chi + R_a (1 - chi)).
+    En la Fig 6 original la referencia es n_S = chi (numero contra area) y el
+    filtro estandar deja entrar R_a de 0.05 a 0.25 en los poligonos."""
+    df = df_arcos[(df_arcos['chi'] > 0) & (df_arcos['chi'] <= 0.4)
+                  & np.isclose(df_arcos[AR_COL].astype(float), ar_comp, atol=0.03)].copy()
+    if df.empty:
+        print(f"  [!] Fig 6B: no hay arcos con R_a ~ {ar_comp}")
+        return
+    df['frac_arco'] = df['Particulas_Tipo_1'] / df['Total_Particulas_Arco']
+    plt.figure()
+    for sys_name in matrix_systems:
+        group = df[df['sistema'] == sys_name]
+        if group.empty:
+            continue
+        grp = group.groupby('chi')['frac_arco'].agg(['mean', 'std', 'count']).reset_index()
+        grp['sem'] = grp['std'] / np.sqrt(grp['count'])
+        color, marker = CFG.system_style.get(sys_name, ('black', 'o'))
+        plt.errorbar(
+            grp['chi'], grp['mean'], yerr=grp['sem'],
+            fmt=f'{marker}-', color=color,
+            label=CFG.english_labels.get(sys_name, sys_name), **ERRORBAR_KW,
+        )
+
+    chi_ref = np.linspace(0, 0.45, 200)
+    plt.plot(chi_ref, chi_ref / (chi_ref + ar_comp * (1 - chi_ref)), **REF_LINE_KW,
+             label=rf'Homogeneous ($R_{{\rm a}} = {ar_comp:g}$)')
+    plt.xlim(0, 0.45)
+    plt.xlabel(r"Global Concentration $\chi$")
+    plt.ylabel(r"Arch Small-Grain Fraction $n_{\rm S}$")
+    plt.legend(loc='lower right')
+    save_plot("6-arch-composition_B")
+
+
 def plot_arch_analysis(df_stats: pd.DataFrame):
     """Plot 6, 9 y 10: composición, tortuosidad y tamaños de avalancha."""
     if not os.path.exists(CFG.arcos_path):
@@ -587,6 +687,8 @@ def plot_arch_analysis(df_stats: pd.DataFrame):
 
     # --- Plot 6: Composición (fraccion numerica y fraccion masica) ---
     plot_arch_composition(df_arcos, matrix_systems)
+
+    plot_arch_composition_B(df_arcos[df_arcos['sistema'].isin(matrix_systems)], matrix_systems)
 
     # --- Filtro chi = 0.2 ---
     target_chi = 0.2
@@ -916,6 +1018,7 @@ def main():
     # Flujo / avalanchas
     # plot_puros_vs_orificio(df)
     plot_disco_vs_area_ratio(df)
+    plot_disco_vs_area_ratio_norm(df)
     plot_sweeps_by_system(df, sistemas_meta)
     plot_sweeps_by_system(df, sistemas_meta, zoom=True, xlim=(0.05, 0.15))
     plot_geometric_effects(df)

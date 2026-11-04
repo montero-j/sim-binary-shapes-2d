@@ -116,7 +116,7 @@ def calcular_chi_temporal(row):
     # Area real de cada especie: los poligonos tienen los n vertices sobre la
     # circunferencia de radio r (globalSetup.cpp), area (n/2) r^2 sin(2pi/n);
     # los discos pi r^2. Antes se usaba pi r^2 para todos, lo que sesgaba
-    # chi_out en mezclas de formas distintas (ej. cuadrado-disco).
+    # chi_eff en mezclas de formas distintas (ej. cuadrado-disco).
     areas_unitarias = {i: area_grano(g['radius'], g.get('sides', 1)) for i, g in enumerate(grain_info)}
     tipo_chica = especie_chica(areas_unitarias)
 
@@ -185,7 +185,7 @@ def calcular_chi_temporal(row):
 
 
 def medir_segregacion(df_plot, chi_nominal):
-    """Cuanto se aparta chi_out del nominal, sobre la curva suavizada con una
+    """Cuanto se aparta chi_eff del nominal, sobre la curva suavizada con una
     media movil de SUAVIZADO_BATCHES ventanas (asi no cuenta el ruido de
     cada ventana). Relativo a chi_nominal:
       desvio_medio_rel  media de |chi_suave - chi_nom| / chi_nom
@@ -198,12 +198,12 @@ def medir_segregacion(df_plot, chi_nominal):
     dev = np.abs(suave - chi_nominal) / chi_nominal
     return {'desvio_medio_rel': float(dev.mean()), 'desvio_max_rel': float(dev.max()),
             'deriva_rel': float((chi[-n:].mean() - chi[:n].mean()) / chi_nominal),
-            'chi_out_medio': float(chi.mean()), 'n_ventanas': len(chi)}
+            'chi_eff_medio': float(chi.mean()), 'n_ventanas': len(chi)}
 
 
 def analizar_flujo_temporal(row):
     """
-    Grafico chi_out(t) de una simulacion (en su carpeta). Devuelve un dict
+    Grafico chi_eff(t) de una simulacion (en su carpeta). Devuelve un dict
     con 'status' explicando el resultado (ok, o el motivo exacto de por
     que no se genero grafico para esta fila) y las medidas de segregacion.
     """
@@ -239,7 +239,7 @@ def analizar_flujo_temporal(row):
 
         plt.grid(False)
         plt.xlabel(r"Simulation Time (s)")
-        plt.ylabel(r"Outflow Concentration $\chi_{out}$")
+        plt.ylabel(r"Outflow Concentration $\chi_{\rm eff}$")
         plt.ylim(0, min(1.0, max(chi_nominal * 2.5, df_plot['chi_eff'].max() * 1.3, 0.05)))
         _xlim_intervalo(plt.gca())
         plt.legend(title=f"{label_en}, run {tirada}", loc='upper right')
@@ -262,9 +262,13 @@ def _xlim_intervalo(ax):
 
 
 def figura_comparativa(df_idx, casos, out, normalizar=False):
-    """chi_out(t) de varias simulaciones en un mismo grafico (solo lineas),
+    """chi_eff(t) de varias simulaciones en un mismo grafico (solo lineas),
     cada una con su chi nominal como linea discontinua del mismo color.
-    casos: lista de sim_hash (se aceptan prefijos)."""
+    casos: lista de sim_hash (se aceptan prefijos), o ['todos'] para todas las
+    simulaciones que quedan despues de --sistema / --chi / --area_ratio."""
+    if list(casos) == ['todos']:
+        casos = df_idx['sim_hash'].astype(str).tolist()
+        print(f"--casos todos: {len(casos)} simulaciones")
     _estilo()
     fig, ax = plt.subplots(figsize=(10, 5))
     y_max = 0.0
@@ -299,7 +303,7 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
         return
     ax.grid(False)
     ax.set_xlabel(r'Simulation Time (s)')
-    ax.set_ylabel(r'$\chi_{out} / \chi$' if normalizar else r'Outflow Concentration $\chi_{out}$')
+    ax.set_ylabel(r'$\chi_{\rm eff} / \chi$' if normalizar else r'Outflow Concentration $\chi_{\rm eff}$')
     # margen arriba para que la leyenda (adentro) no tape las curvas
     n_casos = len(ax.get_legend_handles_labels()[1])
     ax.set_ylim(0, y_max * (1.2 + 0.12 * n_casos) if y_max > 0 else 1)
@@ -350,9 +354,10 @@ def main():
     parser.add_argument('--workers', type=int, default=CPU_CORES)
     parser.add_argument('--casos', nargs='+', default=None,
                         help="sim_hash (o prefijos) para UNA figura comparativa con todas las curvas; "
-                             "no genera las figuras por simulacion")
+                             "'todos' = las que quedan con --sistema/--chi/--area_ratio. "
+                             "No genera las figuras por simulacion")
     parser.add_argument('--normalizar', action='store_true',
-                        help="figura comparativa con chi_out / chi nominal (referencia en 1)")
+                        help="figura comparativa con chi_eff / chi nominal (referencia en 1)")
     parser.add_argument('--t_min', type=float, default=None,
                         help="inicio del intervalo de tiempo (s); vale para todos los modos")
     parser.add_argument('--t_max', type=float, default=None,
@@ -429,7 +434,7 @@ def main():
         r.to_csv(out_csv, index=False)
         cols = [c for c in ('sim_hash', 'system_type', 'chi', 'area_ratio_nominal', 'tirada',
                             'desvio_medio_rel', 'desvio_max_rel', 'deriva_rel') if c in r.columns]
-        print(f"Segregacion de chi_out respecto del nominal (media movil de {SUAVIZADO_BATCHES} ventanas), "
+        print(f"Segregacion de chi_eff respecto del nominal (media movil de {SUAVIZADO_BATCHES} ventanas), "
               f"las {args.top} que mas segregan de {len(r)}:")
         with pd.option_context('display.width', 200):
             print(r[cols].head(args.top).to_string(index=False, float_format='%.3f'))

@@ -86,5 +86,7 @@ mkdir -p ~/bin && cp setup/git-pushsync ~/bin/       # 'git pushsync' = push + c
 
 ## Notas
 
+- `setup/inventario_disco.sh`: inventario de solo lectura de todo lo de este trabajo que hay en el disco (home de WSL, OneDrive, Descargas, otros discos): clones de git, carpetas de datos, archivos grandes, duplicados, enlaces rotos y caches. Escribe `~/inventario_disco_<fecha>.txt`; no mueve ni borra nada.
+
 - `migrar_datos_locales.sh`: correrlo una vez después del pull de la reorganización para recuperar los archivos pesados y acomodar los datos locales.
 - `AUDITORIA_REORGANIZACION.md`: detalle de qué se movió, a dónde y por qué.
