@@ -674,6 +674,8 @@ def plot_arch_composition(df_arcos: pd.DataFrame, sistemas: List[str]):
     n_s, n_l = df['Particulas_Tipo_1'].astype(float), df['Particulas_Tipo_0'].astype(float)
     df['frac_num'] = n_s / (n_s + n_l)
     df['frac_masa'] = r * n_s / (r * n_s + n_l)
+    # enriquecimiento del arco: chi_arch / chi (1 = incorporacion al azar)
+    df['frac_masa_rel'] = df['frac_masa'] / df['chi'].astype(float)
 
     chi_ref = np.linspace(0.0, 0.45, 200)
     versiones = [
@@ -681,6 +683,8 @@ def plot_arch_composition(df_arcos: pd.DataFrame, sistemas: List[str]):
          n_s_homogeneo(chi_ref, AR_COMPOSICION), rf"Homogeneous, $n_{{\rm S}}(\chi)$", "6-arch-composition-number"),
         ('frac_masa', r"Arch Mass Fraction of Small Disks $\chi_{\rm arch}$",
          chi_ref, r"Homogeneous, $\chi_{\rm arch} = \chi$", "6-arch-composition-mass"),
+        ('frac_masa_rel', r"$\chi_{\rm arch}/\chi$",
+         np.ones_like(chi_ref), r"Homogeneous, $\chi_{\rm arch} = \chi$", "6-arch-composition-mass-ratio"),
     ]
     for col, ylabel, y_ref, label_ref, nombre in versiones:
         plt.figure()
@@ -702,9 +706,19 @@ def plot_arch_composition(df_arcos: pd.DataFrame, sistemas: List[str]):
         plt.xlim(0, 0.45)
         if col == 'frac_num':
             plt.ylim(0, 1)
+        if col == 'frac_masa_rel':
+            # escala log: se ve la distancia a la referencia (1) y las
+            # diferencias entre formas, que en escala lineal quedan aplastadas
+            plt.yscale('log')
+            y_min = df.groupby(['sistema', 'chi'])[col].mean().min()
+            plt.ylim(0.6 * y_min, 1.6)
         plt.xlabel(r"Concentration $\chi$")
         plt.ylabel(ylabel)
-        plt.legend(loc='upper left')
+        if col == 'frac_masa_rel':
+            # en el espacio libre entre la referencia (1) y los datos (~0.1)
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, 0.82), ncol=2, fontsize='small')
+        else:
+            plt.legend(loc='upper left')
         save_plot(nombre + SUFIJO_NUEVO)
 
 
@@ -890,6 +904,15 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
 # MAIN
 # =============================================================================
 
+def solo_composicion():
+    """Solo la figura 6 (composicion de arcos), sin el resto del pipeline:
+    python3 graficos_finales.py --solo_composicion"""
+    aplicar_estilo()
+    sistemas = ['Disco(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Oct(G)-Disco(C)']
+    plot_arch_composition(prepare_arcos(pd.read_csv(CFG.arcos_path)), sistemas)
+    print(f"[+] Figuras 6 en: {CFG.out_dir}")
+
+
 def main():
     print("[+] Starting integrated PDF pipeline...")
 
@@ -935,4 +958,8 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys as _sys_main
+    if '--solo_composicion' in _sys_main.argv:
+        solo_composicion()
+        raise SystemExit
     main()
