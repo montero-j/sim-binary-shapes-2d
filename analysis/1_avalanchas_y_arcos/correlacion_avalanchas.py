@@ -123,6 +123,8 @@ def main():
     ap.add_argument('--area_ratio', type=float, nargs='+', default=None)
     ap.add_argument('--chi', type=float, nargs='+', default=None,
                     help='concentraciones a graficar (para el mapa de primer retorno conviene elegir pocas)')
+    ap.add_argument('--una_por_chi', action='store_true',
+                    help='una sola corrida por (sistema, chi): la de mas avalanchas')
     ap.add_argument('--k_max', type=int, default=20, help='lag maximo de rho(k) (default 20)')
     ap.add_argument('--etiqueta', default=None)
     ap.add_argument('--out_dir', default=rutas.GRAFICOS_FINALES_DIR)
@@ -131,6 +133,13 @@ def main():
     sims = cargar(args.av, args.index, args.sistema, args.area_ratio, args.chi)
     if not sims:
         sys.exit("[!] No quedaron simulaciones despues de filtrar (--sistema / --area_ratio / --chi).")
+    if args.una_por_chi:
+        mejor = {}
+        for h, (meta, x) in sims.items():
+            clave = (meta['system_type'], round(float(meta['chi']), 6))
+            if clave not in mejor or len(x) > len(sims[mejor[clave]][1]):
+                mejor[clave] = h
+        sims = {h: sims[h] for h in mejor.values()}
 
     filas = []
     for h, (meta, x) in sorted(sims.items(), key=lambda t: (t[1][0]['system_type'], t[1][0]['chi'])):
