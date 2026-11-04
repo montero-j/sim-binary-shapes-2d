@@ -105,8 +105,10 @@ def figura_autocorrelacion(sims, out, k_max):
     ax.axhline(0.0, **REF_LINE_KW)
     for h, c, m in zip(orden, colores, marcadores):
         meta, x = sims[h]
-        rho = autocorrelacion(x, k_max)
-        ax.plot(np.arange(1, len(rho) + 1), rho, f'{m}-', color=c, ms=4, label=rf"$\chi = {meta['chi']:g}$")
+        # rho(0) = 1 por definicion (cada avalancha consigo misma)
+        rho = np.concatenate([[1.0], autocorrelacion(x, k_max)])
+        ax.plot(np.arange(len(rho)), rho, f'{m}-', color=c, ms=4, label=rf"$\chi = {meta['chi']:g}$")
+    ax.set_xlim(-0.5, k_max + 0.5)
     ax.set_xlabel(r"Lag $k$ (avalanches)")
     ax.set_ylabel(r"$\rho(k)$")
     ax.legend(loc='best', fontsize='small', ncol=2)
