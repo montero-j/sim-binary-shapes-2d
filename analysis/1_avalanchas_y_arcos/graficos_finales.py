@@ -276,7 +276,7 @@ def plot_disco_vs_area_ratio_norm(df: pd.DataFrame):
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:g}"))
     ax.yaxis.set_minor_formatter(plt.NullFormatter())
     plt.xlim(left=0.0)
-    plt.xlabel(r"Nominal Area Ratio $R_{\rm a}$")
+    plt.xlabel(r"Area Ratio $R_{\rm a}$")
     plt.ylabel(r"$\langle s \rangle / \langle s \rangle_0$")
 
     plt.legend(loc='best')
