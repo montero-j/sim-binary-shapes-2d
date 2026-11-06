@@ -288,7 +288,7 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
         _, _, nombre = estilo_sistema(row.get('system_type', ''))
         extra = ''
         if 'area_ratio_nominal' in row and pd.notnull(row['area_ratio_nominal']):
-            extra = rf', $A_r = {row["area_ratio_nominal"]:g}$'
+            extra = rf', $R_{{\rm a}} = {row["area_ratio_nominal"]:g}$'
         ax.plot(d['tiempo'], y, '-', color=color, lw=1.2, zorder=2,
                 label=rf'{nombre}, $\chi = {chi_nom:.3g}${extra}')
         ax.axhline(1.0 if normalizar else chi_nom, color=color, ls='--', lw=1.5, zorder=3)
