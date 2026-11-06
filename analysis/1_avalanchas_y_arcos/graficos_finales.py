@@ -620,7 +620,7 @@ def plot_geometric_effects_linear(df: pd.DataFrame, target_ar: float = 0.15):
             )
 
         plt.xlabel(r"Concentration $\chi$")
-        plt.ylabel(r"Mean Size $\langle s \rangle$")
+        plt.ylabel(r"Mean Avalanche Size $\langle s \rangle$")
         plt.legend(loc='upper left')
         save_plot(filename)
 
