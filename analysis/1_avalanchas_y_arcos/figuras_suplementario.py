@@ -38,6 +38,14 @@ SISTEMAS = ['Tri(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Disco(G)
 R_A, R_A_TOL = 0.1, 0.02
 CHI_FIJO, CHI_TOL = 0.2, 1e-3
 LETRAS = ['(a)', '(b)', '(c)', '(d)']
+# chi intermedios de otra tanda de simulaciones: la Fig. 7 del paper
+# (graficos_finales.plot_sweeps_by_system sin zoom) los excluye, y aca tambien
+CHIS_EXCLUIDOS = [0.07, 0.075, 0.085, 0.09, 0.095, 0.105, 0.11, 0.15]
+
+
+def sin_chis_excluidos(df):
+    chi = df['chi'].astype(float).to_numpy()
+    return df[~np.isclose(chi[:, None], CHIS_EXCLUIDOS, atol=1e-6).any(axis=1)]
 
 
 def guardar(fig, nombre):
@@ -91,7 +99,7 @@ def fig_clogging_zoom(df, chi_max=0.2):
     fig, axes = plt.subplots(2, 2, figsize=(10, 7.5))
     colores, marcadores = gf.SEQ_STYLE(3)
     for ax, sis, let in zip(axes.flat, SISTEMAS, LETRAS):
-        d = df[(df['sistema'] == sis) & (df['chi'] > 0) & (df['chi'] <= chi_max + 1e-9)]
+        d = sin_chis_excluidos(df[(df['sistema'] == sis) & (df['chi'] > 0) & (df['chi'] <= chi_max + 1e-9)])
         if d.empty:
             ax.set_visible(False)
             continue
