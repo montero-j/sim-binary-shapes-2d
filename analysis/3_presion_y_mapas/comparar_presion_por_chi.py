@@ -203,6 +203,37 @@ def limites_y(df_agg, formas, mags, error, regiones=REGIONES, margen=0.05):
     return max(0.0, ymin - pad), ymax + pad
 
 
+def _tapados(ax, leg, puntos):
+    """Cuantos puntos (datos, extremos de barras, lineas) caen dentro de la leyenda."""
+    fig = ax.figure
+    fig.canvas.draw()
+    bb = leg.get_window_extent(fig.canvas.get_renderer()).expanded(1.04, 1.08)
+    pts = ax.transData.transform(np.asarray([p for p in puntos if np.all(np.isfinite(p))], dtype=float))
+    return int(np.sum((pts[:, 0] >= bb.x0) & (pts[:, 0] <= bb.x1) & (pts[:, 1] >= bb.y0) & (pts[:, 1] <= bb.y1)))
+
+
+def leyenda_sin_tapar(ax, puntos, titulo, max_pasos=12):
+    """Leyenda dentro del grafico, en dos columnas, en la posicion que no tapa
+    datos (ni barras de error ni lineas). Si ninguna posicion queda libre, sube
+    el limite superior del eje y de a poco hasta que haya lugar arriba."""
+    posiciones = ['upper right', 'upper left', 'upper center', 'center right', 'center left',
+                  'center', 'lower right', 'lower left', 'lower center']
+    kw = dict(title=titulo, ncol=2, columnspacing=1.0,
+              handlelength=1.6, framealpha=0.9)
+    y0, y1 = ax.get_ylim()
+    for paso in range(max_pasos + 1):
+        mejor = None
+        for loc in posiciones:
+            leg = ax.legend(loc=loc, **kw)
+            n = _tapados(ax, leg, puntos)
+            if mejor is None or n < mejor[0]:
+                mejor = (n, loc)
+            if n == 0:
+                return leg
+        ax.set_ylim(y0, y1 + (paso + 1) * 0.08 * (y1 - y0))
+    return ax.legend(loc=mejor[1], **kw)
+
+
 def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=0.0,
                        ylim=None, regiones=REGIONES, leyenda='afuera', xlim=(0.0, 0.4)):
     """Una sola figura, para una sola forma de grano grande y una magnitud:
@@ -221,6 +252,7 @@ def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=
 
     fig, ax = plt.subplots()
     series = [(region, t) for region in regiones for t in ('B', 'S')]
+    puntos = []
     for k, (region, t) in enumerate(series):
         color, label_region = REGION_STYLE[region]
         clave = f'{mag}_{region}_{t}'
@@ -237,6 +269,17 @@ def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=
         # Las chicas no existen en chi=0 (Area=0 -> NaN); matplotlib corta
         # la linea ahi solo, no hace falta filtrar a mano.
         ax.errorbar(chi + dx, y, yerr=yerr, label=label, **estilo, **ERRORBAR_KW)
+        e = np.zeros_like(y) if yerr is None else np.nan_to_num(np.asarray(yerr, dtype=float))
+        for xs in (chi + dx,):
+            puntos += [(xi, yi) for xi, yi in zip(xs, y)]
+            puntos += [(xi, yi + ei) for xi, yi, ei in zip(xs, y, e)]
+            puntos += [(xi, yi - ei) for xi, yi, ei in zip(xs, y, e)]
+            # puntos intermedios sobre las lineas que unen los datos
+            ok = np.isfinite(y)
+            xo, yo = xs[ok], y[ok]
+            for i in range(len(xo) - 1):
+                t = np.linspace(0, 1, 12)
+                puntos += list(zip(xo[i] + t * (xo[i + 1] - xo[i]), yo[i] + t * (yo[i + 1] - yo[i])))
 
     if ylim is not None:
         ax.set_ylim(*ylim)
@@ -254,6 +297,8 @@ def graficar_una_forma(df_agg, forma, mag, etiqueta_chi, error='sem', desplazar=
     elif leyenda == 'arriba':
         ax.legend(title=label_forma, loc='lower center', bbox_to_anchor=(0.5, 1.02), ncol=2,
                   borderaxespad=0.0)
+    elif leyenda == 'auto':
+        leyenda_sin_tapar(ax, puntos, label_forma)
     else:
         ax.legend(title=label_forma, loc='best')
     return fig
@@ -284,7 +329,7 @@ def main():
                              "std = desviacion estandar, ninguno = sin barras")
     parser.add_argument('--xlim', type=float, nargs=2, default=[0.0, 0.4], metavar=('CHIMIN', 'CHIMAX'),
                         help='rango de chi del eje x, igual en todas las figuras (default 0 0.4)')
-    parser.add_argument('--leyenda', choices=['afuera', 'arriba', 'adentro'], default='afuera',
+    parser.add_argument('--leyenda', choices=['afuera', 'arriba', 'adentro', 'auto'], default='afuera',
                         help="Posicion de la leyenda: afuera (default, a la derecha del grafico), "
                              "arriba (encima, en 2 columnas) o adentro (donde matplotlib encuentre lugar)")
     parser.add_argument('--desplazar', type=float, default=0.0,
