@@ -285,7 +285,7 @@ def _xlim_intervalo(ax):
         ax.set_xlim(T_MIN if T_MIN is not None else lo, T_MAX if T_MAX is not None else hi)
 
 
-def figura_comparativa(df_idx, casos, out, normalizar=False):
+def figura_comparativa(df_idx, casos, out, normalizar=False, cortar=False):
     """chi_eff(t) de varias simulaciones en un mismo grafico (solo lineas),
     cada una con su chi nominal como linea discontinua del mismo color.
     casos: lista de sim_hash (se aceptan prefijos), o ['todos'] para todas las
@@ -296,6 +296,7 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
     _estilo()
     fig, ax = plt.subplots(figsize=(10, 5))
     y_max = 0.0
+    datos = []
     for k, h in enumerate(casos):
         fila = df_idx[df_idx['sim_hash'].astype(str).str.startswith(str(h))]
         if fila.empty:
@@ -306,6 +307,14 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
         if d is None:
             print(f"  [!] {h}: {info['status']} {info.get('detail', '')}")
             continue
+        datos.append((k, row, info, d))
+    t_corte = None
+    if cortar and datos:
+        # todas las curvas terminan en el ultimo dato de la mas corta
+        t_corte = min(float(d['tiempo'].max()) for *_, d in datos)
+        datos = [(k, row, info, d[d['tiempo'] <= t_corte]) for k, row, info, d in datos]
+        print(f"--cortar_al_mas_corto: todas las curvas hasta t = {t_corte:.0f} s")
+    for k, row, info, d in datos:
         chi_nom = info['chi_nominal']
         y = d['chi_eff'] / chi_nom if normalizar else d['chi_eff']
         color = COLORES_CASOS[k % len(COLORES_CASOS)]
@@ -334,6 +343,8 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
     n_casos = len(ax.get_legend_handles_labels()[1])
     ax.set_ylim(0, y_max * (1.2 + 0.12 * n_casos) if y_max > 0 else 1)
     _xlim_intervalo(ax)
+    if t_corte is not None:
+        ax.set_xlim(T_MIN if T_MIN is not None else 0, t_corte)
     ax.legend(loc='upper right')
     guardar_figura(out, fig)
     plt.close(fig)
@@ -398,6 +409,9 @@ def main():
     parser.add_argument('--escalar_a_carpeta', action='store_true',
                         help="multiplica chi_eff(t) por chi_carpeta/chi_real (desde params.in): la curva "
                              "arranca en el chi de la carpeta; la referencia sigue siendo el de la carpeta")
+    parser.add_argument('--cortar_al_mas_corto', action='store_true',
+                        help="figura comparativa: todas las curvas (y el eje x) terminan en el ultimo "
+                             "dato de la simulacion mas corta")
     parser.add_argument('--ranking', action='store_true',
                         help="no grafica: calcula la segregacion de cada simulacion y lista las que mas segregan")
     parser.add_argument('--sistema', nargs='+', default=None,
@@ -451,7 +465,8 @@ def main():
             raise SystemExit("Ninguna simulacion cumple los filtros (revisar --sistema / --chi / --area_ratio).")
 
     if args.casos:
-        figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar)
+        figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar,
+                           cortar=args.cortar_al_mas_corto)
         return
 
     if args.ranking:
