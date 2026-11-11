@@ -246,6 +246,17 @@ Define qué partículas son la región `arco`.
 
 ### 5.1 Normal del contacto — `normales_contacto()` (líneas 353–416)
 
+> **Normal de Box2D cuando está disponible.** Desde la rama `tensor-en-simulacion`, el simulador escribe también `atasco_contacts_full_<jam>.dat`, con la normal real del manifold de cada fila de `atasco_contacts_<jam>.dat` (ver `simulation/README_tensor_atasco.md`).
+>
+> `process_one_jam_task` la lee con `leer_normales_box2d` y la pasa a `fuerzas_contacto(..., normales=...)`. La inferencia de esta sección solo se usa en dos casos:
+>
+> - con datos viejos, sin ese archivo;
+> - si el archivo no coincide fila por fila con los contactos.
+>
+> La columna `normales` del resumen por atasco dice cuál se usó.
+>
+> Motivo: la inferencia falla en los contactos **esquina contra esquina** entre polígonos. Ahí el punto de Box2D queda a ~0.01 (la piel `b2_polygonRadius`) de un vértice de cada polígono y la normal sale girada 90°. Afecta al 2–4 % de los granos, con errores de más del 10 % en su tensor.
+
 Devuelve, para cada contacto, la normal unitaria **de A hacia B** (convención de Box2D). Con `metodo='nuevo'` (el que se usa):
 
 | Caso | Normal | Líneas |
