@@ -69,7 +69,8 @@ def numero_de_ruta(path, claves):
 
 
 def analizar(sim_dir):
-    granos = leer_granos(os.path.join(sim_dir, 'params.in'))
+    nombre = next(f for f in os.listdir(sim_dir) if f.lower() == 'params.in')
+    granos = leer_granos(os.path.join(sim_dir, nombre))
     if not granos:
         return None
     fila = dict(path=sim_dir,
@@ -103,7 +104,7 @@ def analizar(sim_dir):
 
 def buscar_simulaciones(raiz):
     for dirpath, _, files in os.walk(raiz):
-        if 'params.in' in files:
+        if any(f.lower() == 'params.in' for f in files):
             yield dirpath
 
 
@@ -113,8 +114,13 @@ def main():
     ap.add_argument('--out_csv', default=None, help="guardar la tabla (default: chi_real.csv en la primera --dir)")
     args = ap.parse_args()
 
+    for raiz in args.dir:
+        if not os.path.isdir(raiz):
+            raise SystemExit(f"No existe (o no se ve desde aca) la carpeta: {raiz}")
     filas = [f for raiz in args.dir for d in buscar_simulaciones(raiz) if (f := analizar(d))]
     if not filas:
+        for raiz in args.dir:
+            print(f"Contenido de {raiz}: {sorted(os.listdir(raiz))[:15]}")
         raise SystemExit(f"No encontre params.in en {args.dir}")
     df = pd.DataFrame(filas)
     df['ruta_rel'] = [os.path.relpath(p, args.dir[0]) for p in df['path']]
