@@ -143,7 +143,8 @@ def area_particula(p):
 def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
                             fuerzas='arco', escala_fuerza=ESCALA_GROSOR_FUERZA,
                             grosor_arco=GROSOR_LINEA_ARCO, colores='especie', salida=None,
-                            color_fondo=COLOR_BORDE_FUERZAS, grosor_fondo=GROSOR_BORDE_FUERZAS):
+                            color_fondo=COLOR_BORDE_FUERZAS, grosor_fondo=GROSOR_BORDE_FUERZAS,
+                            recorte='roi', margen=4.0):
     """estilo='fuerzas': fuerzas coloreadas con inferno, granos sin relleno (original).
     estilo='simple': granos rellenos con un color suave, fuerzas de un solo color.
     fuerzas='arco': solo los contactos en los que participa un grano del arco;
@@ -205,8 +206,17 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
     arco_path = detectar_arco_primario(G, particles, params)
 
     y_coords = [p['pos'][1] for p in particles.values()]
-    y_max_plot = max(y_coords) + 2  
-    y_min_plot = -2                 
+    y_max_plot = max(y_coords) + 2
+    y_min_plot = -2
+    if recorte == 'roi' and arco_path:
+        # Ventana como la ROI de presion_tensor_arch.py (banda de pared a pared
+        # entre el centro mas bajo y el mas alto del arco), con `margen`
+        # diametros de los granos grandes por encima del arco.
+        y_arco_max = max(particles[i]['pos'][1] for i in arco_path)
+        y_max_plot = y_arco_max + margen
+        y_min_plot = -1
+    elif recorte == 'roi':
+        print("Aviso: no se detecto arco; se grafica el silo completo.")
     
     ancho_silo = r_silo * 2
     alto_silo = y_max_plot - y_min_plot
@@ -224,6 +234,8 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
     fc, ec, lw_borde = ((COLOR_RELLENO_GRANO, COLOR_BORDE_GRANO, GROSOR_BORDE_SIMPLE) if simple
                         else ('none', color_fondo, grosor_fondo))
     for pid, p in particles.items():
+        if p['pos'][1] > y_max_plot + 2:   # fuera de la ventana: no se dibuja
+            continue
         if p['shape'] == 'Disco':
             ax.add_patch(Circle(p['pos'], p['r'], fc=fc, ec=ec, lw=lw_borde, zorder=1))
         else:
@@ -334,6 +346,10 @@ if __name__ == "__main__":
                     help=f"color del borde de los granos fuera del arco (estilo fuerzas; default {COLOR_BORDE_FUERZAS})")
     ap.add_argument('--grosor_fondo', type=float, default=GROSOR_BORDE_FUERZAS,
                     help=f"grosor del borde de los granos fuera del arco (default {GROSOR_BORDE_FUERZAS})")
+    ap.add_argument('--recorte', choices=['roi', 'silo'], default='roi',
+                    help="roi: ventana desde el piso hasta el tope del arco + margen (default); silo: silo completo")
+    ap.add_argument('--margen', type=float, default=4.0,
+                    help="altura (en d) que se muestra por encima del centro mas alto del arco (default 4)")
     ap.add_argument('--salida', default=None,
                     help="carpeta donde guardar la imagen (default: la de la simulacion)")
     args = ap.parse_args()
@@ -341,4 +357,5 @@ if __name__ == "__main__":
         graficar_arco_y_fuerzas(args.sim, f"{int(j):05d}", estilo=args.estilo, formato=args.formato,
                                 fuerzas=args.fuerzas, escala_fuerza=args.escala_fuerza,
                                 grosor_arco=args.grosor_arco, colores=args.colores, salida=args.salida,
-                                color_fondo=args.color_fondo, grosor_fondo=args.grosor_fondo)
+                                color_fondo=args.color_fondo, grosor_fondo=args.grosor_fondo,
+                                recorte=args.recorte, margen=args.margen)
