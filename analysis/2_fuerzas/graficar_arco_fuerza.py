@@ -21,7 +21,8 @@ mpl.rcParams['svg.fonttype'] = 'none'
 ESCALA_GROSOR_FUERZA = 0.4
 NOMBRE_COLORMAP = 'inferno' 
 # Grosor del contorno de los granos (estilo 'fuerzas' y 'simple')
-GROSOR_BORDE_FUERZAS = 0.15
+GROSOR_BORDE_FUERZAS = 0.4
+COLOR_BORDE_FUERZAS = '#777777'   # gris medio (antes #CCCCCC, muy claro)
 GROSOR_BORDE_SIMPLE = 0.3
 
 # Estilo 'simple': granos rellenos con un color suave y todas las fuerzas del
@@ -141,7 +142,8 @@ def area_particula(p):
 
 def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
                             fuerzas='arco', escala_fuerza=ESCALA_GROSOR_FUERZA,
-                            grosor_arco=GROSOR_LINEA_ARCO, colores='especie', salida=None):
+                            grosor_arco=GROSOR_LINEA_ARCO, colores='especie', salida=None,
+                            color_fondo=COLOR_BORDE_FUERZAS, grosor_fondo=GROSOR_BORDE_FUERZAS):
     """estilo='fuerzas': fuerzas coloreadas con inferno, granos sin relleno (original).
     estilo='simple': granos rellenos con un color suave, fuerzas de un solo color.
     fuerzas='arco': solo los contactos en los que participa un grano del arco;
@@ -220,7 +222,7 @@ def graficar_arco_y_fuerzas(sim_folder, jam_id, estilo='fuerzas', formato='svg',
 
     # 1. Dibujar Partículas (Fondo)
     fc, ec, lw_borde = ((COLOR_RELLENO_GRANO, COLOR_BORDE_GRANO, GROSOR_BORDE_SIMPLE) if simple
-                        else ('none', '#CCCCCC', GROSOR_BORDE_FUERZAS))
+                        else ('none', color_fondo, grosor_fondo))
     for pid, p in particles.items():
         if p['shape'] == 'Disco':
             ax.add_patch(Circle(p['pos'], p['r'], fc=fc, ec=ec, lw=lw_borde, zorder=1))
@@ -328,10 +330,15 @@ if __name__ == "__main__":
                     help=f"grosor de la linea azul del arco (default {GROSOR_LINEA_ARCO})")
     ap.add_argument('--colores', choices=['especie', 'arco'], default='especie',
                     help="especie: granos del arco grande rojo, chico azul (como los videos); arco: arco naranja/verde (anterior)")
+    ap.add_argument('--color_fondo', default=COLOR_BORDE_FUERZAS,
+                    help=f"color del borde de los granos fuera del arco (estilo fuerzas; default {COLOR_BORDE_FUERZAS})")
+    ap.add_argument('--grosor_fondo', type=float, default=GROSOR_BORDE_FUERZAS,
+                    help=f"grosor del borde de los granos fuera del arco (default {GROSOR_BORDE_FUERZAS})")
     ap.add_argument('--salida', default=None,
                     help="carpeta donde guardar la imagen (default: la de la simulacion)")
     args = ap.parse_args()
     for j in args.jam_id:
         graficar_arco_y_fuerzas(args.sim, f"{int(j):05d}", estilo=args.estilo, formato=args.formato,
                                 fuerzas=args.fuerzas, escala_fuerza=args.escala_fuerza,
-                                grosor_arco=args.grosor_arco, colores=args.colores, salida=args.salida)
+                                grosor_arco=args.grosor_arco, colores=args.colores, salida=args.salida,
+                                color_fondo=args.color_fondo, grosor_fondo=args.grosor_fondo)
