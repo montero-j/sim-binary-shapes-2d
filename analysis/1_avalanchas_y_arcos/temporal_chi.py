@@ -126,7 +126,9 @@ def calcular_chi_temporal(row):
             factor = chi_nominal / r['chi_real']
             # leyenda: el R_a que quiso el generador (coherente con el chi de
             # la carpeta), no el del index (que usa pi r^2 para todo)
-            ra_real = r.get('Ra_prevista')
+            # redondeado a 1 cifra significativa (0.1146 -> 0.1), el valor
+            # nominal del barrido
+            ra_real = float(f"{r['Ra_prevista']:.1g}") if pd.notnull(r.get('Ra_prevista')) else None
             base['factor_escala'] = factor
 
     if len(grain_info) < 2:
