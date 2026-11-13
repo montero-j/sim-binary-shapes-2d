@@ -1,0 +1,908 @@
+% Tensor de estrés en sim-binary-shapes-2d: discos y polígonos regulares.
+% Compila con pdflatex, xelatex o lualatex:
+%   cd docs/estres && latexmk -pdf estres.tex && latexmk -c
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+\else
+  \usepackage{fontspec}
+\fi
+\usepackage[spanish,es-noshorthands,es-tabla]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{calc,arrows.meta,positioning}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\vect}[1]{\mathbf{#1}}
+\newcommand{\n}{\vect{n}}
+\newcommand{\tv}{\vect{t}}
+\newcommand{\nh}{\hat{\vect{n}}}
+\newcommand{\tvh}{\hat{\vect{t}}}
+\newcommand{\lv}{\vect{l}}
+\newcommand{\f}{\vect{f}}
+% \code: texto de código que puede cortarse después de cada guion bajo
+\newcommand{\codeus}{\textunderscore\allowbreak}
+\newcommand{\code}[1]{\texttt{\begingroup\let\_\codeus#1\endgroup}}
+\setlength{\emergencystretch}{3em}
+\newcommand{\ave}[1]{\langle #1 \rangle}
+
+\title{Tensor de estrés en \code{sim-binary-shapes-2d}:\\
+  discos y polígonos regulares}
+\author{Manuel Carlevaro}
+\date{Rama \code{tensor-en-simulacion}, octubre de 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+  Este documento describe todo el cálculo del tensor de estrés de los
+  granos en los atascos del silo: cómo Box2D resuelve los contactos y qué
+  se guarda de ellos, la definición del tensor de cada grano y sus
+  propiedades para discos y para polígonos regulares, las dos
+  implementaciones (en la simulación, con la normal real de cada contacto,
+  y en \code{presion\_tensor\_arch.py}, a partir de los archivos), las
+  magnitudes derivadas (presión, corte, promedios por región y por
+  especie) y la verificación de que ambas coinciden. Cada fórmula remite a
+  la función que la implementa.
+\end{abstract}
+
+\tableofcontents
+
+% ===========================================================================
+\section{Flujo de datos}
+\label{sec:flujo}
+
+En cada atasco, antes de romper el arco, el simulador \code{eo-silo}
+escribe cuatro archivos en \code{frames\_<dirID>/}
+(figura~\ref{fig:flujo}). Las cuatro salidas corresponden al mismo
+instante: las posiciones y los impulsos del último paso de integración.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small,
+  caja/.style={draw, rounded corners, align=center, inner sep=4pt,
+    minimum height=1.0cm},
+  arch/.style={draw, align=left, inner sep=3pt, font=\footnotesize\ttfamily,
+    fill=gray!8},
+  nuevo/.style={arch, fill=blue!8, draw=blue!60!black}]
+  \node[caja, minimum width=2.6cm] (sim) at (0,0)
+    {\code{eo-silo}\\ atasco detectado};
+  \node[arch] (xy) at (5.2,1.95) {atasco\_<jam>.xy};
+  \node[arch] (ct) at (5.2,0.65) {atasco\_contacts\_<jam>.dat};
+  \node[nuevo] (cf) at (5.2,-0.65) {atasco\_contacts\_full\_<jam>.dat};
+  \node[nuevo] (ts) at (5.2,-1.95) {atasco\_tensor\_<jam>.dat};
+  \foreach \a in {xy,ct,cf,ts} \draw[->] (sim.east) -- (\a.west);
+  \node[caja, minimum width=3.4cm] (py) at (10.6,1.0)
+    {\code{presion\_tensor\_arch.py}\\ tensor, $P$, $\tau$, regiones};
+  \node[caja, minimum width=3.4cm] (cmp) at (10.6,-1.6)
+    {\code{comparar\_tensor\_}\\ \code{simulacion.py}};
+  \draw[->] (xy.east) -- (py.west);
+  \draw[->] (ct.east) -- (py.west);
+  \draw[->, blue!60!black, dashed] (cf.east) -- (py.west);
+  \foreach \a in {xy,ct,cf,ts} \draw[->, gray] (\a.east) -- (cmp.west);
+  \node[font=\footnotesize, align=left, anchor=north west] at (-1.4,-2.7)
+    {En azul: salidas nuevas de la rama \code{tensor-en-simulacion}
+     (\code{simulation/src/jam\_output.cpp}).};
+\end{tikzpicture}
+\caption{Archivos de cada atasco y su uso. \code{saveAtascoFrame} escribe
+  la geometría (\code{.xy}), \code{saveAtascoContacts} los contactos en el
+  formato de siempre y \code{saveAtascoTensor} el tensor de cada grano y
+  los contactos con su normal. El análisis usa la normal de Box2D (flecha
+  a trazos) si el archivo \code{atasco\_contacts\_full} está disponible
+  (sección~\ref{sec:normal}).}
+\label{fig:flujo}
+\end{figure}
+
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright}p{0.33\textwidth}p{0.6\textwidth}}
+  \toprule
+  Archivo & Contenido \\
+  \midrule
+  \code{atasco\_<jam>.xy} & Granos activos (\code{isGrain} e \code{isIn}):
+    discos como \code{gID 1 x y r tipo}, polígonos como
+    \code{gID n x1 y1 ... xn yn tipo}; paredes y tapa. \\
+  \code{atasco\_contacts\_<jam>.dat} & Una fila por punto de manifold:
+    \code{ID\_A ID\_B PosX PosY NormalImpulse TangentImpulse}, en
+    \code{\%.6e}. Sin la normal. \\
+  \code{atasco\_contacts\_full\_<jam>.dat} & Las mismas filas, en el mismo
+    orden, con la normal de Box2D, las fuerzas, el tipo de manifold y los
+    centros. \\
+  \code{atasco\_tensor\_<jam>.dat} & Tensor de cada grano calculado en la
+    simulación, fuerza y torque netos, contactos y velocidades. \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ===========================================================================
+\section{Convenciones}
+\label{sec:conv}
+
+\paragraph{Unidades.} Box2D usa unidades MKS. El grano grande de
+referencia tiene radio $0.5$, así que su diámetro vale $d = 1$~m, y la
+gravedad es $g = 9.8$~m/s$^2$ en la dirección $-y$. El estrés
+bidimensional se mide en N/m. \code{presion\_tensor\_arch.py} reporta
+además las magnitudes divididas por $g$ (columnas \code{\_reducida}), en
+kg/m.
+
+\paragraph{Signo.} Hay dos convenciones, una en cada implementación:
+\begin{itemize}
+  \item el simulador escribe $s_{ij}$ con \emph{compresión negativa}, como
+    la fórmula de Love \eqref{eq:love};
+  \item el análisis escribe $\sigma_{ij} = -s_{ij}$, con \emph{compresión
+    positiva}.
+\end{itemize}
+La presión es positiva en compresión en las dos:
+$P = -\tfrac12(s_{xx}+s_{yy}) = \tfrac12(\sigma_{xx}+\sigma_{yy})$.
+
+\paragraph{Orden de los índices.} En el simulador,
+$s_{ij} \propto \sum f_i\, l_j$: el primer índice va con la fuerza y el
+segundo con el brazo. El análisis acumula
+$S_{ab} = \sum l_a f_b$, con el brazo primero:
+\begin{equation}
+  A\, s_{xx} = S_{00}, \qquad A\, s_{xy} = S_{10}, \qquad
+  A\, s_{yx} = S_{01}, \qquad A\, s_{yy} = S_{11}.
+  \label{eq:mapeo}
+\end{equation}
+El orden solo importa para la parte antisimétrica.
+
+% ===========================================================================
+\section{Geometría de los granos}
+\label{sec:geom}
+
+\paragraph{Discos.} Radio $r$ y área $A = \pi r^2$.
+
+\paragraph{Polígonos regulares.} \code{GlobalSetup::load} construye los
+$n$ vértices ($3 \le n \le 8$) con el \code{radio} del archivo de
+parámetros como radio \emph{circunscripto} $R$:
+\begin{equation}
+  \vect{v}_k = R\,(\cos 2\pi k/n,\ \sin 2\pi k/n), \qquad k = 0,\dots,n-1.
+\end{equation}
+Con $\alpha = \pi/n$, la apotema, el lado y el área son
+\begin{equation}
+  a = R\cos\alpha, \qquad L = 2R\sin\alpha, \qquad
+  A = \tfrac{n}{2}R^2\sin 2\alpha = n\,a^2\tan\alpha .
+\end{equation}
+El centro de masa coincide con el centroide. Para $n \ge 3$, el segundo
+momento de área es isótropo: $\int r_i r_j\,dA \propto \delta_{ij}$.
+
+\paragraph{La piel de Box2D.} Un \code{b2PolygonShape} tiene
+\code{m\_radius} igual a \code{b2\_polygonRadius}, es decir
+$2\times\code{b2\_linearSlop} = r_s = 0.01$~m. El contacto se resuelve
+sobre el polígono \emph{redondeado}, inflado en $r_s$
+(figura~\ref{fig:geom}a), pero la masa (\code{ComputeMass}) usa solo los
+vértices. Los discos no tienen piel.
+
+\paragraph{Área del grano.} Las dos implementaciones usan el área de los
+vértices, la misma con la que Box2D calcula la masa:
+\begin{itemize}
+  \item el simulador la obtiene con \code{ComputeMass(\&md, 1)};
+  \item el análisis la calcula con la fórmula del área de Gauss sobre los
+    vértices del \code{.xy}.
+\end{itemize}
+Difieren en $3\times10^{-5}$, por los seis decimales del archivo.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % (a) Hexágono con la piel (exagerada)
+  \begin{scope}
+    \def\R{2}
+    \draw[line width=0.36cm, line join=round, gray!35]
+      (0:\R) -- (60:\R) -- (120:\R) -- (180:\R) -- (240:\R) -- (300:\R)
+      -- cycle;
+    \filldraw[thick, fill=white]
+      (0:\R) -- (60:\R) -- (120:\R) -- (180:\R) -- (240:\R) -- (300:\R)
+      -- cycle;
+    \fill (0,0) circle (0.04) node[below left] {$O$};
+    \draw (0,0) -- (0:\R) node[midway, below] {$R$};
+    \draw (0,0) -- (30:{\R*cos(30)}) node[midway, above left] {$a$};
+    \draw (0.55,0) arc[start angle=0, end angle=30, radius=0.55];
+    \node at (15:0.8) {$\alpha$};
+    \draw ($(30:{\R*cos(30)})+(210:0.2)$) -- ++(120:0.2) -- ++(30:0.2);
+    \node at (30:2.25) {$L$};
+    \draw[<-] (150:1.82) -- (150:2.55) node[above left] {$r_s$};
+    \node at (-2.4,2.1) {(a)};
+  \end{scope}
+  % (b) Detalle de un contacto cara--cara con piel
+  \begin{scope}[shift={(3.3,-0.9)}]
+    \begin{scope}
+      \clip (0.2,-0.9) rectangle (7.3,2.4);
+      \draw[line width=1.8cm, blue!45, draw opacity=0.45, line join=round]
+        (-1,0) -- (5,0) -- ++(300:3);
+      \draw[line width=1.8cm, red!45, draw opacity=0.45, line join=round]
+        (9,1.4) -- (1.5,1.4) -- ++(120:3);
+      \fill[white] (-1,0) -- (5,0) -- ++(300:3) -- (-1,-2.6) -- cycle;
+      \fill[white] (9,1.4) -- (1.5,1.4) -- ++(120:3) -- (9,4) -- cycle;
+      \draw[very thick] (-1,0) -- (5,0) -- ++(300:3);
+      \draw[very thick] (9,1.4) -- (1.5,1.4) -- ++(120:3);
+      \node at (3.2,-0.5) {A};
+      \node at (4.6,1.9) {B};
+      \node[font=\scriptsize, blue!50!black] at (0.9,0.35) {piel de A};
+      \node[font=\scriptsize, red!50!black] at (6.4,0.95) {piel de B};
+      \draw[densely dotted] (1.5,0.7) -- (5,0.7);
+      \fill (1.5,0.7) circle (0.07) (5,0.7) circle (0.07);
+      \draw[<->] (2.4,0) -- (2.4,0.9) node[midway, left] {\small $r_s$};
+      \draw[<->] (3.1,0.5) -- (3.1,0.9) node[midway, right] {\small $\delta$};
+      \draw[<->] (4.0,0) -- (4.0,0.7)
+        node[midway, right] {\small $r_s - \delta/2$};
+      \draw[->, thick, blue] (6.8,-0.8) -- (6.8,0.0) node[right] {$\n$};
+    \end{scope}
+    \node at (0.5,2.65) {(b)};
+    \node at (3.7,-1.3) {$\lambda_A = a + r_s - \delta/2$};
+  \end{scope}
+\end{tikzpicture}
+\caption{(a) Polígono regular ($n = 6$) con radio circunscripto $R$,
+  apotema $a$, lado $L$ y $\alpha = \pi/n$. La banda gris es la piel de
+  Box2D, de espesor $r_s$, exagerado (en la simulación $r_s = 0.01$);
+  los vértices quedan redondeados. (b) Contacto cara--cara entre A
+  (abajo) y B (arriba). Las líneas gruesas son las caras y las bandas de
+  color las pieles, que se superponen en $\delta$. Box2D ubica los dos
+  puntos del manifold (círculos) a mitad de camino entre las pieles, en
+  los extremos de la zona en que las caras se enfrentan.}
+\label{fig:geom}
+\end{figure}
+
+% ===========================================================================
+\section{Fuerzas de contacto en Box2D}
+\label{sec:box2d}
+
+Box2D 2.4.2 resuelve los contactos con impulsos. En cada paso $\Delta t$,
+el solver de velocidades acumula en cada punto $i$ del manifold un impulso
+normal $\lambda_{n,i} \ge 0$ (\code{normalImpulse}) y uno tangencial
+$\lambda_{t,i}$ (\code{tangentImpulse}), con $|\lambda_t| \le \mu
+\lambda_n$. Las fuerzas medias durante el paso son
+\begin{equation}
+  F_n = \lambda_n/\Delta t, \qquad F_t = \lambda_t/\Delta t .
+\end{equation}
+
+\paragraph{Normal y tangente.} La normal $\n$ del manifold apunta del
+cuerpo A al cuerpo B (A y B son las \emph{fixtures} del contacto). La
+tangente es la que usa \code{b2ContactSolver}:
+\begin{equation}
+  \tv = \code{b2Cross}(\n, 1) = (n_y, -n_x).
+\end{equation}
+La fuerza sobre cada cuerpo es
+\begin{equation}
+  \f_B = F_n\,\n + F_t\,\tv, \qquad \f_A = -\f_B .
+  \label{eq:fuerza}
+\end{equation}
+El análisis escribe la fuerza sobre A con $\tv' = (-n_y, n_x) = -\tv$:
+$\f_A = (-F_n\,\n + F_t\,\tv')$ (\code{fuerzas\_contacto}). Es la misma
+fuerza. Se validó con el equilibrio estático de cada grano: el residuo es
+$\sim 10^{-6}$, mientras que con la tangente invertida es del orden de
+$mg$ (sección~\ref{sec:verif}).
+
+\paragraph{Tipos de manifold.} El campo \code{type} del manifold (columna
+\code{mtype} de \code{atasco\_contacts\_full}) distingue tres casos:
+\begin{itemize}
+  \item \code{e\_circles} (0): disco con disco. Un punto, sobre la línea
+    de los centros.
+  \item \code{e\_faceA} (1) y \code{e\_faceB} (2): hay un polígono o una
+    pared. La normal es la de una \emph{cara de referencia} de A o de B.
+  \item Contra un polígono, el manifold tiene uno o dos puntos: dos en un
+    contacto cara--cara (figura~\ref{fig:geom}b) y uno en un contacto de
+    vértice o contra un disco.
+\end{itemize}
+Los contactos con las paredes (cadena del silo) tienen un manifold por
+arista. Por eso un mismo par grano--pared puede aparecer en varias filas.
+
+\paragraph{Ubicación del punto.} Box2D ubica cada punto a mitad de camino
+entre las superficies de los dos cuerpos, piel incluida. Para un disco,
+el punto queda sobre la recta normal que pasa por su centro. Para la cara
+de referencia de un polígono, queda a una distancia $r_s - \delta/2$ de
+la cara (figura~\ref{fig:geom}b).
+
+\paragraph{Qué impulsos se guardan.} Al escribir el atasco, los impulsos
+del manifold son los del último \code{Step}. Si los cuerpos de un contacto
+están dormidos, Box2D no lo vuelve a resolver y conserva los impulsos del
+último paso en que lo resolvió. En un atasco en reposo esos impulsos
+siguen equilibrando el peso: el residuo de equilibrio no cambia
+(sección~\ref{sec:verif}).
+
+% ===========================================================================
+\section{Tensor de estrés de cada grano}
+\label{sec:tensor}
+
+\subsection{Definición}
+
+Para cada grano $p$ se suma sobre todos sus puntos de contacto $c$, con
+otros granos y con las paredes:
+\begin{equation}
+  s^{(p)}_{ij} = \frac{1}{A_p}\sum_c f^{(c)}_i\, l^{(c)}_j, \qquad
+  s^{n(p)}_{ij} = \frac{1}{A_p}\sum_c f^{n(c)}_i\, l^{(c)}_j, \qquad
+  s^t = s - s^n,
+  \label{eq:love}
+\end{equation}
+donde:
+\begin{itemize}
+  \item $\f^{(c)}$ es la fuerza sobre el grano según \eqref{eq:fuerza};
+  \item $\f^{n(c)} = \pm F_n\n$ es solo su componente normal;
+  \item $\lv^{(c)}$ es el vector del centro de masa al punto de contacto;
+  \item $A_p$ es el área del grano.
+\end{itemize}
+
+\paragraph{Relación con el estrés de Cauchy.} Para un cuerpo rígido, el
+teorema de la divergencia da
+\begin{equation}
+  \int_{A_p}\sigma^{\text{C}}_{ij}\,dA = \sum_c f_i l_j
+    + \int_{A_p} \rho\, g_i\, r_j\,dA - \int_{A_p}\rho\, a_i\, r_j\,dA .
+\end{equation}
+La gravedad es uniforme y $\int \vect{r}\,dA = 0$ respecto del centro de
+masa, así que no aporta. En un atasco en reposo, la aceleración es nula.
+Por lo tanto, $s^{(p)}$ es el estrés medio de Cauchy del grano: la
+fórmula de Love vale para cualquier forma.
+
+\subsection{Brazo de palanca y marco del grano}
+
+Para cada grano y cada punto de contacto se definen:
+\begin{itemize}
+  \item la normal saliente $\nh$: $\nh = \n$ para A y $\nh = -\n$ para B;
+  \item la tangente $\tvh = (\hat n_y, -\hat n_x)$.
+\end{itemize}
+Con \eqref{eq:fuerza}, la fuerza sobre el grano es, en los dos casos,
+\begin{equation}
+  \f = -F_n\,\nh - F_t\,\tvh ,
+\end{equation}
+y el brazo se descompone como
+\begin{equation}
+  \lv = \lambda\,\nh + \eta\,\tvh, \qquad \lambda = \lv\cdot\nh, \quad
+  \eta = \lv\cdot\tvh .
+\end{equation}
+$\lambda$ es la distancia del centro a la recta de contacto y $\eta$ la
+\emph{excentricidad} del punto (figura~\ref{fig:contactos}).
+
+\begin{itemize}
+  \item Disco: $\lambda = r - \delta/2$ y $\eta = 0$.
+  \item Polígono, contacto cara--cara: para el dueño de la cara de
+    referencia, $\lambda \simeq a + r_s - \delta/2$ y $|\eta| \le L/2$.
+  \item Polígono, contacto de vértice: para el grano que apoya el
+    vértice, $\lambda < R$ y $|\eta|$ puede ser del orden de $R$.
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=1.1, >=Stealth]
+  % (a) Disco
+  \begin{scope}
+    \draw[thick] (0,0) circle (1);
+    \draw[thick] (1.9,0) circle (1);
+    \fill (0,0) circle (0.04);
+    \node at (-0.45,-0.45) {$p$};
+    \node at (2.35,-0.45) {$q$};
+    \draw[->, gray, thick] (0,0) -- (0.92,0) node[midway, above] {$\lv$};
+    \fill (0.95,0) circle (0.05);
+    \draw[->, very thick, blue] (0.95,0) -- (1.6,0) node[above] {$\nh$};
+    \draw[->, very thick, red] (0.95,0) -- (0.95,-0.65)
+      node[below] {$\tvh$};
+    \node at (-1.1,1.35) {(a)};
+    \node at (0.95,-1.65) {$\lambda = r - \delta/2, \ \eta = 0$};
+  \end{scope}
+  % (b) Cara--cara
+  \begin{scope}[shift={(4.7,0)}]
+    \draw[thick] (-1,-1) rectangle (1,1);
+    \draw[thick] (1,-0.55) rectangle (3,1.45);
+    \node at (-0.6,-0.7) {$p$};
+    \node at (2.5,0.95) {$q$};
+    \fill (0,0) circle (0.04);
+    \draw[->, gray, thick] (0,0) -- (0.96,0.96)
+      node[pos=0.6, above left] {$\lv_1$};
+    \draw[->, gray, thick] (0,0) -- (0.95,-0.52)
+      node[pos=0.5, below left] {$\lv_2$};
+    \draw[dashed] (0,0) -- (1,0);
+    \node[above] at (0.8,0) {$\lambda$};
+    \fill (1,1) circle (0.06) node[above right] {1};
+    \fill (1,-0.55) circle (0.06) node[below right] {2};
+    \draw[densely dotted] (1,0) -- (1.5,0);
+    \draw[<->] (1.35,0) -- (1.35,1) node[midway, right] {$\eta_1$};
+    \draw[<->] (1.35,0) -- (1.35,-0.55) node[midway, right] {$\eta_2$};
+    \draw[->, very thick, blue] (-0.85,0.75) -- (-0.4,0.75)
+      node[right] {$\nh$};
+    \draw[->, very thick, red] (-0.85,0.75) -- (-0.85,0.3)
+      node[right] {$\tvh$};
+    \node at (-1.1,1.35) {(b)};
+    \node at (1,-1.65) {dos puntos, un contacto};
+  \end{scope}
+  % (c) Vértice--cara
+  \begin{scope}[shift={(9.7,0)}]
+    \def\Rc{1.4142}
+    \draw[thick] (25:\Rc) -- (115:\Rc) -- (205:\Rc) -- (295:\Rc) -- cycle;
+    \draw[thick] (1.2817,-1) rectangle (2.9,1.25);
+    \node at (0.3,-0.6) {$p$};
+    \node at (2.45,-0.65) {$q$};
+    \fill (0,0) circle (0.04);
+    \draw[->, gray, thick] (0,0) -- (25:1.37)
+      node[pos=0.5, above] {$\lv$};
+    \draw[dashed] (0,0) -- (1.2817,0) node[midway, below] {$\lambda$};
+    \fill (25:\Rc) circle (0.06);
+    \draw[densely dotted] (1.2817,0) -- (1.8,0);
+    \draw[<->] (1.65,0) -- (1.65,0.5977) node[midway, right] {$\eta$};
+    \draw[->, very thick, blue] (-0.6,-0.15) -- (-0.15,-0.15)
+      node[right] {$\nh$};
+    \draw[->, very thick, red] (-0.6,-0.15) -- (-0.6,-0.6)
+      node[right] {$\tvh$};
+    \node at (-1.3,1.35) {(c)};
+    \node at (0.8,-1.65) {$\lambda < R$, \ $|\eta| \sim R$};
+  \end{scope}
+\end{tikzpicture}
+\caption{Marco del grano $p$ y descomposición del brazo
+  $\lv = \lambda\nh + \eta\tvh$. $\nh$ es la normal saliente de $p$
+  (hacia $q$) y $\tvh = (\hat n_y, -\hat n_x)$, hacia abajo. (a) Disco:
+  el punto está sobre la línea de los centros y $\lv\parallel\nh$.
+  (b) Contacto cara--cara: el manifold tiene dos puntos con el mismo
+  $\lambda$ y excentricidades distintas ($\eta_1 < 0$, $\eta_2 > 0$,
+  medidas sobre $\tvh$). Es \emph{un} contacto con dos puntos. (c)
+  Contacto vértice--cara: $\nh$ es la normal de la cara de $q$ y $\lv$
+  apunta al vértice de $p$. Se omite la piel.}
+\label{fig:contactos}
+\end{figure}
+
+\subsection{Formas explícitas y propiedades}
+\label{sec:prop}
+
+Sustituyendo en \eqref{eq:love},
+\begin{align}
+  A_p\, s^{n(p)} &= -\sum_c F_n\left(\lambda\,\nh\otimes\nh
+                     + \eta\,\nh\otimes\tvh\right), \label{eq:sn}\\
+  A_p\, s^{t(p)} &= -\sum_c F_t\left(\lambda\,\tvh\otimes\nh
+                     + \eta\,\tvh\otimes\tvh\right). \label{eq:st}
+\end{align}
+Con $\nh\times\tvh = -1$ y
+$(\vect{a}\otimes\vect{b})_{yx} - (\vect{a}\otimes\vect{b})_{xy} =
+-\vect{a}\times\vect{b}$ se obtienen la presión y la parte antisimétrica:
+\begin{align}
+  P^{(p)} &= -\tfrac12\operatorname{tr}s^{(p)}
+    = \frac{1}{2A_p}\sum_c\left(F_n\lambda + F_t\eta\right),
+    \label{eq:presion}\\
+  s_{yx} - s_{xy} &= \frac{1}{A_p}\sum_c\left(F_t\lambda - F_n\eta\right)
+    = \frac{\tau^t_\text{c} + \tau^n_\text{c}}{A_p}
+    = \frac{\tau_\text{c}}{A_p},
+    \label{eq:torque}
+\end{align}
+donde $\tau_\text{c} = \sum_c \lv\times\f$ es el torque de contacto
+respecto del centro de masa. La tabla resume las propiedades para cada
+forma.
+
+\begin{center}
+\small
+\begin{tabular}{>{\raggedright}p{0.36\textwidth}>{\raggedright}p{0.24\textwidth}p{0.30\textwidth}}
+  \toprule
+  Propiedad & Discos ($\eta = 0$) & Polígonos \\
+  \midrule
+  $s^n$ simétrico & sí & no: $s^n_{yx}-s^n_{xy} = -\sum F_n\eta/A_p$ \\
+  $\operatorname{tr}s^t = 0$ (la fricción no aporta a $P$)
+    & sí & no: $\operatorname{tr}s^t = -\sum F_t\eta/A_p$ \\
+  $A_p(s_{yx}-s_{xy}) = \tau_\text{c}$ & sí & sí \\
+  En reposo ($\tau_\text{c} = 0$): $s$ simétrico & sí & sí \\
+  Presión por cara: $P^n \simeq \sum F_n/P_\text{er}$
+    & $P_\text{er} = 2\pi r$ & $P_\text{er} = nL$ (contactos cara--cara) \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+En un atasco en reposo, el tensor total de cada grano es simétrico, como
+se afirma en el artículo. Con polígonos, en cambio, sus partes normal y
+tangencial no lo son por separado: los dos torques $\tau^n_\text{c}$ y
+$\tau^t_\text{c}$ pueden ser grandes y cancelarse
+(figura~\ref{fig:torque}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=1.25, >=Stealth]
+  \begin{scope}
+    \draw[thick] (-1.4,-1.4) rectangle (1.4,1.4);
+    \fill (0,0) circle (0.045) node[above left] {$O$};
+    \draw[->, gray, thick] (0,0) -- (1.36,0.875)
+      node[pos=0.6, above left] {$\lv$};
+    \draw[dashed] (0,0) -- (1.4,0) node[pos=0.4, below] {$\lambda$};
+    \draw[densely dotted] (1.4,0) -- (1.95,0);
+    \draw[<->] (1.75,0) -- (1.75,0.9) node[midway, right] {$\eta$};
+    \draw[->, very thick, blue!70!black] (1.4,0.9) -- (0.35,0.9)
+      node[pos=0.6, above] {$-F_n\nh$};
+    \draw[->, very thick, red!70!black] (1.4,0.9) -- (1.4,1.95)
+      node[above] {$-F_t\tvh$};
+    \fill (1.4,0.9) circle (0.07);
+    \draw[->, very thick, blue] (-1.1,-0.6) -- (-0.6,-0.6)
+      node[right] {$\nh$};
+    \draw[->, very thick, red] (-1.1,-0.6) -- (-1.1,-1.1)
+      node[right] {$\tvh$};
+    \node[align=left, anchor=west] at (2.5,0.2)
+      {$\tau^n = -F_n\,\eta$\\[3pt]
+       $\tau^t = F_t\,\lambda$\\[3pt]
+       $2A_p\,P = F_n\lambda + F_t\eta$};
+    \node at (-1.6,1.9) {(a)};
+  \end{scope}
+  \begin{scope}[shift={(8.5,0)}]
+    \draw[thick] (-1.4,-1.4) rectangle (1.4,1.4);
+    \fill (0,0) circle (0.045);
+    \draw[->, very thick, blue!70!black] (2.4,0.8) -- (1.4,0.8)
+      node[pos=0.4, above] {$F_n$};
+    \draw[->, very thick, blue!70!black] (-2.4,-0.8) -- (-1.4,-0.8)
+      node[pos=0.4, below] {$F_n$};
+    \fill (1.4,0.8) circle (0.07) (-1.4,-0.8) circle (0.07);
+    \draw[->, thick] (-30:0.5) arc[start angle=-30, end angle=210,
+      radius=0.5];
+    \node at (0,0.8) {$\tau^n > 0$};
+    \node at (-2.3,1.9) {(b)};
+  \end{scope}
+\end{tikzpicture}
+\caption{(a) Fuerza sobre el grano en un punto de su cara derecha ($\nh$
+  hacia la derecha, $\tvh$ hacia abajo). Como el punto está por encima
+  del centro, $\eta < 0$: la fuerza normal produce un torque antihorario
+  $\tau^n = -F_n\eta > 0$, y la tangencial aporta a la presión con
+  $F_t\eta$. En un disco, $\eta = 0$ y ninguno de los dos términos
+  existe. (b) Dos fuerzas puramente normales con resultante nula: el
+  grano está en equilibrio de fuerzas pero recibe un torque, y
+  $s^n_{yx}-s^n_{xy} \ne 0$. En un disco, toda fuerza normal pasa por el
+  centro.}
+\label{fig:torque}
+\end{figure}
+
+% ===========================================================================
+\section{La normal del contacto}
+\label{sec:normal}
+
+El tensor depende de la normal de cada contacto, que separa la fuerza en
+sus partes normal y tangencial \eqref{eq:fuerza}. Hay dos maneras de
+obtenerla.
+
+\subsection{Normal de Box2D}
+
+La normal del manifold es la que usó el solver
+(\code{b2WorldManifold::}\allowbreak\code{normal}).
+\begin{itemize}
+  \item En la simulación, \code{saveAtascoTensor} la usa directamente y
+    la escribe en \code{atasco\_contacts\_full}.
+  \item En el análisis, \code{leer\_normales\_box2d} la lee cuando ese
+    archivo existe y coincide fila por fila con \code{atasco\_contacts}.
+\end{itemize}
+La columna \code{normales} del resumen por atasco indica cuál se usó:
+\code{box2d} o \code{inferidas (...)}.
+
+\subsection{Normal inferida de la geometría}
+
+Con los datos anteriores a la rama \code{tensor-en-simulacion} no hay
+normal guardada. \code{normales\_contacto} la infiere, orientada de A
+hacia B:
+\begin{itemize}
+  \item \emph{Si uno de los cuerpos es un disco}, usa la dirección radial
+    del disco, del centro al punto de contacto. Es exacta.
+  \item \emph{Polígono contra polígono o contra pared}: para cada lado
+    busca la cara más cercana al punto de contacto (\code{normales\_poligonos},
+    \code{normales\_paredes}) y su \emph{interioridad}, la distancia de
+    la proyección del punto al vértice más cercano de esa cara. Usa la
+    cara con mayor interioridad, que debería ser la cara de referencia de
+    Box2D.
+\end{itemize}
+
+\paragraph{Dónde falla.} En un contacto \emph{esquina contra esquina}
+entre dos polígonos, el punto de Box2D queda a $\sim r_s$ de un vértice
+de \emph{cada} polígono (figura~\ref{fig:esquina}). Las cuatro caras
+candidatas tienen interioridad $\approx 0$ y la elección es arbitraria.
+Si se elige la cara de al lado, la normal sale girada $90^\circ$ (en un
+cuadrado). Esa fuerza se descompone mal y el tensor de los dos granos
+queda mal. La posición del punto no alcanza para resolver la ambigüedad:
+hace falta la normal que usó el solver.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth, scale=1.3]
+  % Núcleos y pieles de dos cuadrados que se tocan por las esquinas
+  \begin{scope}
+    \clip (-2.6,-2.3) rectangle (3.4,2.6);
+    \draw[line width=1.17cm, blue!45, draw opacity=0.45, line join=round]
+      (-3,0) -- (0,0) -- (0,-3);
+    \draw[line width=1.17cm, red!45, draw opacity=0.45, line join=round]
+      (4,0.55) -- (0.62,0.55) -- (0.62,4);
+    \fill[white] (-3,0) -- (0,0) -- (0,-3) -- (-3,-3) -- cycle;
+    \fill[white] (4,0.55) -- (0.62,0.55) -- (0.62,4) -- (4,4) -- cycle;
+    \draw[very thick] (-3,0) -- (0,0) -- (0,-3);
+    \draw[very thick] (4,0.55) -- (0.62,0.55) -- (0.62,4);
+  \end{scope}
+  \node at (-1.4,-1.3) {A};
+  \node at (2.0,1.8) {B};
+  \fill (0.31,0.275) circle (0.06);
+  \draw[gray] (0.31,0.275) -- (-0.35,1.05)
+    node[above left, font=\small, inner sep=1pt] {punto de contacto};
+  \draw[->, ultra thick, red!70!black] (0.31,0.275) -- ++(1.2,0)
+    node[below right, font=\small, align=left] {Box2D (cara de A)};
+  \draw[->, ultra thick, blue!70!black, dashed] (0.31,0.275) -- ++(0,1.2)
+    node[above, font=\small] {inferida};
+  \node[font=\scriptsize, blue!50!black] at (-1.5,0.22) {piel de A};
+  \node[font=\scriptsize, red!50!black] at (2.9,0.33) {piel de B};
+\end{tikzpicture}
+\caption{Contacto esquina contra esquina entre dos cuadrados, con la piel
+  exagerada. El punto de Box2D (círculo) queda junto a un vértice de cada
+  polígono, así que las cuatro caras son igualmente candidatas. En este
+  ejemplo, Box2D eligió la cara derecha de A (flecha llena) y la
+  inferencia, la cara superior (flecha a trazos): la normal queda girada
+  $90^\circ$.}
+\label{fig:esquina}
+\end{figure}
+
+% ===========================================================================
+\section{Implementación en la simulación}
+\label{sec:sim}
+
+\code{saveAtascoTensor} (\code{simulation/src/jam\_output.cpp}) recorre
+la lista de contactos de Box2D que se tocan. Para cada punto $i$ de cada
+manifold:
+\begin{enumerate}
+  \item calcula $F_n$, $F_t$, $\n$ y $\tv$ y la fuerza
+    \eqref{eq:fuerza} sobre A y sobre B;
+  \item a cada cuerpo que sea un grano activo le suma $\f\otimes\lv$ (y la
+    parte normal), la fuerza y el torque $\lv\times\f$, con
+    $\lv = $ punto $-$ \code{GetWorldCenter()};
+  \item escribe la fila del punto en \code{atasco\_contacts\_full}.
+\end{enumerate}
+Al final divide por el área (\code{ComputeMass}) y escribe una fila por
+grano activo en \code{atasco\_tensor}:
+\begin{center}
+  \small\code{gID tipo nLados x y A m sxx sxy syx syy snxx snxy snyx snyy
+  Fx Fy tau z z\_w z\_f vx vy w}
+\end{center}
+
+\paragraph{Contactos.} \code{z} cuenta \emph{contactos} (manifolds con
+$\sum_i F_{n,i} > 0$), no puntos: un contacto cara--cara cuenta una vez.
+\code{z\_w} es la parte de ellos con paredes y \code{z\_f} la parte con
+los dos puntos activos (cara--cara). La fracción $z_f/z$ indica cuánto de
+la red de fuerzas se transmite por caras, que es lo que controla $\eta$.
+
+\paragraph{Velocidades.} \code{vx}, \code{vy} y \code{w} permiten
+comprobar que el atasco está en reposo.
+
+% ===========================================================================
+\section{Implementación en el análisis}
+\label{sec:py}
+
+\subsection{Tensor, presión y corte de cada grano}
+
+\code{calcular\_tensor\_y\_presion\_vectorizado} hace los siguientes
+pasos:
+\begin{enumerate}
+  \item une cada contacto con los dos granos del \code{.xy}: centroide,
+    forma y vértices;
+  \item obtiene la normal (sección~\ref{sec:normal}) y la fuerza sobre A
+    (\code{fuerzas\_contacto});
+  \item acumula $S_{ab} = \sum_c l_a f_b$ en A con $\f_A$ y en B con
+    $-\f_A$. Los contactos con paredes (\code{id} $<0$) aportan solo al
+    grano;
+  \item calcula, con compresión positiva,
+    \begin{equation}
+      P = -\frac{S_{00}+S_{11}}{2A}, \quad
+      \sigma_{xx} = -\frac{S_{00}}{A}, \quad
+      \sigma_{yy} = -\frac{S_{11}}{A}, \quad
+      \sigma_{xy} = -\frac{S_{01}+S_{10}}{2A},
+    \end{equation}
+    \begin{equation}
+      \tau = \sqrt{\left(\frac{\sigma_{xx}-\sigma_{yy}}{2}\right)^2
+                   + \sigma_{xy}^2}.
+    \end{equation}
+\end{enumerate}
+$\sigma_{xy}$ es la parte simétrica del tensor. La antisimétrica, nula en
+reposo, no se usa. $\tau$ es el radio del círculo de Mohr: el corte
+máximo. Las columnas \code{\_reducida} son las mismas magnitudes
+divididas por $g$.
+
+\subsection{Especies, arco y regiones}
+
+\paragraph{Especies.} \code{especie\_por\_tipo} (\code{analysis/especies.py})
+clasifica cada grano por su columna \code{tipo} del \code{.xy}, no por un
+umbral de radio:
+\begin{itemize}
+  \item la especie de mayor área mediana es \code{B} (grande);
+  \item la otra es \code{S} (chica);
+  \item con $\chi = 0$, con una sola especie, o con áreas iguales dentro
+    del 1\,\%, todos los granos son \code{B}.
+\end{itemize}
+
+\paragraph{Arco.} \code{detectar\_arco\_primario} arma el grafo de
+contactos grano--grano: una arista por par, con costo $10^{y_\text{max}}$,
+donde $y_\text{max}$ es la altura del más alto de los dos centros. Busca
+el camino de costo mínimo (Dijkstra) entre un grano apoyado a la
+izquierda del orificio y uno apoyado a la derecha. Ese costo favorece
+fuertemente los caminos bajos. Después recorta de las puntas los granos
+que son solo cimiento: apoyados en el piso fuera del orificio, o con dos o
+más apoyos inferiores ajenos al arco.
+
+\paragraph{Regiones.} Hay tres (figura~\ref{fig:regiones}):
+\begin{itemize}
+  \item \emph{arco}: los granos del camino;
+  \item \emph{ROI}: los demás granos con centro en la franja horizontal
+    $y^\text{arco}_\text{min} \le y \le y^\text{arco}_\text{max} +
+    \code{ROI\_EXTRA}$, de pared a pared, con $\code{ROI\_EXTRA} = 0$ por
+    defecto;
+  \item \emph{bulk}: el resto.
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=0.75]
+  \fill[orange!15] (-5,0.75) rectangle (5,2.0);
+  \draw[very thick] (-5,4.2) -- (-5,0) -- (-1.1,0);
+  \draw[very thick] (1.1,0) -- (5,0) -- (5,4.2);
+  \foreach \x/\y in {-3.5/0.5,-2.5/0.5,2.6/0.5,3.6/0.5,-4.5/0.5,4.5/0.5,
+                     -4.4/1.5,-3.4/1.6,3.3/1.55,4.4/1.5,-4.4/2.6,-3.3/2.7,
+                     -2.2/2.7,-1.1/3.0,0/3.1,1.1/2.95,2.2/2.7,3.3/2.7,
+                     4.4/2.6,-2.6/3.7,-1.5/3.9,0.5/4.0,1.6/3.9,2.8/3.7}
+    \draw[gray] (\x,\y) circle (0.48);
+  \foreach \x/\y in {-1.65/0.75,-0.75/1.55,0.3/2.0,1.35/1.6,2.0/0.8}
+    \filldraw[fill=red!30, draw=red!60!black, thick] (\x,\y) circle (0.48);
+  \foreach \x/\y in {-2.6/1.5,2.4/1.75}
+    \filldraw[fill=blue!20, draw=blue!60!black] (\x,\y) circle (0.48);
+  \draw[dashed] (-5.4,0.75) -- (5.4,0.75) node[right, font=\small]
+    {$y^\text{arco}_\text{min}$};
+  \draw[dashed] (-5.4,2.0) -- (5.4,2.0) node[right, font=\small]
+    {$y^\text{arco}_\text{max}$};
+  \node[font=\small, red!60!black] at (0,-0.6) {arco};
+  \node[font=\small, blue!60!black, align=center] at (-6.6,1.4)
+    {ROI\\[-1pt]\scriptsize(franja,\\[-2pt]\scriptsize sin el arco)};
+  \node[font=\small] at (-6.6,3.3) {bulk};
+  \draw[<->] (-1.1,-0.25) -- (1.1,-0.25);
+  \node[font=\scriptsize] at (0,-1.1) {orificio $2r$};
+\end{tikzpicture}
+\caption{Regiones de un atasco. En rojo, el arco: camino de contactos de
+  costo mínimo entre los dos bordes del orificio, sin los cimientos. En
+  azul, granos de la ROI: los que no son del arco y tienen el centro en la
+  franja (sombreada) entre los centros más bajo y más alto del arco, de
+  pared a pared. El resto es el bulk.}
+\label{fig:regiones}
+\end{figure}
+
+\subsection{Promedios}
+
+Para cada atasco, región $R$ y especie $e$ se guardan los numeradores y
+denominadores de los promedios pesados por área:
+\begin{equation}
+  \code{SumP\_}R\code{\_}e = \sum_{p\in R,e} P_p A_p, \qquad
+  \code{SumTau\_}R\code{\_}e = \sum_{p\in R,e} \tau_p A_p, \qquad
+  \code{Area\_}R\code{\_}e = \sum_{p\in R,e} A_p .
+\end{equation}
+\code{resumen\_por\_configuracion} los suma sobre todos los atascos de una
+configuración (forma, $\chi$, razón de tamaños) y divide:
+\begin{equation}
+  \ave{P}_{R,e} = \frac{\sum_\text{atascos}\code{SumP\_}R\code{\_}e}
+                       {\sum_\text{atascos}\code{Area\_}R\code{\_}e},
+\end{equation}
+y lo mismo para $\ave{\tau}_{R,e}$. Es el estrés medio sobre los granos
+de esa especie y región: cada atasco pesa según el área de granos que
+aporta, no por igual.
+
+% ===========================================================================
+\section{Verificación}
+\label{sec:verif}
+
+\paragraph{Prueba.} Simulación local de un silo de semiancho 5 y alto
+40, con 250 cuadrados ($R = 0.5$) y 120 discos ($r = 0.158$), orificio
+$r = 1.1$ y \code{tEsperaAtasco: 5.0}, como en producción. Se analizaron
+tres atascos, con 1110 pares grano--atasco. El script es
+\code{analysis/utils/comparar\_tensor\_simulacion.py}.
+
+\paragraph{Controles internos del tensor del simulador.} Se cumplen
+cuatro identidades:
+\begin{itemize}
+  \item \emph{Equilibrio de fuerzas}: $|\vect{F}+m\vect{g}|/mg$ tiene
+    una mediana de $\sim 10^{-6}$ y un máximo de $1.2\times10^{-4}$.
+  \item \emph{Equilibrio de torque}: $|\tau_\text{c}|/(mgR)$ tiene una
+    mediana de $\sim 4\times10^{-7}$ y un máximo de $7\times10^{-5}$. El
+    tensor total es simétrico.
+  \item \emph{Identidad \eqref{eq:torque}}: $A(s_{yx}-s_{xy}) =
+    \tau_\text{c}$ a $4\times10^{-8}$.
+  \item \emph{Virial global}: sumando sobre los granos, los contactos
+    internos se cancelan y queda una identidad exacta que controla
+    signos, brazos y puntos para cualquier forma:
+    \begin{equation}
+      \sum_p A_p s^{(p)} + \sum_p \vect{F}_p\otimes\vect{x}_p
+      = \sum_{c\in\text{ext}}\f_c\otimes\vect{x}_c .
+    \end{equation}
+    Se cumple a $10^{-10}$.
+\end{itemize}
+
+\paragraph{Comparación con el análisis.} La tabla compara, para cada
+grano, la presión del análisis con la de la simulación. El error es
+relativo a $|P| + q$ del simulador, con $q$ el corte máximo.
+
+\begin{center}
+\small
+\begin{tabular}{lccc}
+  \toprule
+  Normal usada por el análisis & mediana & granos $>1$\,\% & granos $>10$\,\% \\
+  \midrule
+  inferida (datos viejos) & $3\times10^{-6}$ & 34 (3.1\,\%) & 21 (1.9\,\%) \\
+  Box2D (\code{atasco\_contacts\_full}) & $1\times10^{-6}$ & 0 & 0 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Con la normal inferida:
+\begin{itemize}
+  \item los discos y las paredes salen exactos;
+  \item entre el 1 y el 2.5\,\% de los puntos de contacto entre
+    polígonos tiene la normal girada $90^\circ$; son todos contactos esquina contra
+    esquina (figura~\ref{fig:esquina});
+  \item las medias por región ($\ave{P}$ en el arco y en la ROI)
+    cambiaron $\le 0.03$\,\% en estos tres atascos, pero el valor de
+    cada grano afectado, por ejemplo en los mapas de presión, está mal.
+\end{itemize}
+Con la normal de Box2D, el análisis coincide con la simulación en todos
+los granos: el error máximo es $6\times10^{-5}$, la precisión de los
+archivos (figura~\ref{fig:comparacion}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+  \begin{groupplot}[group style={group size=2 by 1, horizontal sep=1.6cm},
+      width=6.6cm, height=6.6cm, xmode=log, ymode=log,
+      xmin=0.5, xmax=2000, ymin=0.5, ymax=2000,
+      xlabel={$P$ simulación (N/m)},
+      tick label style={font=\footnotesize}, label style={font=\small},
+      title style={font=\small}]
+    \nextgroupplot[title={Normal inferida}, ylabel={$P$ análisis (N/m)}]
+      \addplot[gray, domain=0.5:2000, samples=2] {x};
+      \addplot[only marks, mark=*, mark size=0.8pt, blue!60!black,
+        restrict expr to domain={\thisrow{err}}{0:0.01}]
+        table[x=P_sim, y=P_py] {datos/p_inferidas.dat};
+      \addplot[only marks, mark=*, mark size=1.6pt, red!80!black,
+        restrict expr to domain={\thisrow{err}}{0.01:1e9}]
+        table[x=P_sim, y=P_py] {datos/p_inferidas.dat};
+    \nextgroupplot[title={Normal de Box2D}]
+      \addplot[gray, domain=0.5:2000, samples=2] {x};
+      \addplot[only marks, mark=*, mark size=0.8pt, blue!60!black]
+        table[x=P_sim, y=P_py] {datos/p_auto.dat};
+  \end{groupplot}
+\end{tikzpicture}
+\caption{Presión de cada grano en los tres atascos de prueba, calculada
+  por el análisis frente a la calculada en la simulación. En rojo, los
+  granos con error mayor que 1\,\%: todos tienen algún contacto de
+  esquina entre polígonos con la normal mal inferida. Con la normal de Box2D,
+  todos los puntos caen sobre la diagonal.}
+\label{fig:comparacion}
+\end{figure}
+
+\paragraph{Atascos que no están en reposo.} Con
+\code{tEsperaAtasco: 1.0}, se guardó un atasco 1~s después de un
+desatasco que no reanudó el flujo. El empaquetamiento todavía se estaba
+reacomodando: la mediana de $|\vect{F}+m\vect{g}|/mg$ era $0.66$. Con los
+5~s de producción no ocurrió en la prueba, pero es un caso posible.
+Conviene descartar esos atascos con las columnas de velocidad o con el
+residuo de equilibrio.
+
+\paragraph{Pruebas sintéticas.} \code{analysis/utils/verificar\_tensor.py
+--sintetico} verifica el signo de $\sigma_{xy}$, la parte tangencial, la
+tercera ley y la invariancia ante rotaciones con casos de resultado
+conocido. Siguen dando correcto con los cambios de la rama.
+
+% ===========================================================================
+\section{Resumen y recomendaciones}
+
+\begin{itemize}
+  \item La fórmula de Love \eqref{eq:love} vale para discos y polígonos.
+    En reposo, el tensor total de cada grano es simétrico. Con polígonos,
+    $s^n$ y $s^t$ no lo son por separado, y la fricción aporta a la
+    presión.
+  \item Las dos implementaciones coinciden a la precisión de los
+    archivos cuando el análisis usa la normal de Box2D.
+  \item Con los datos existentes, sin \code{atasco\_contacts\_full}, la
+    normal inferida falla en los contactos esquina contra esquina entre
+    polígonos. Afecta los valores de un 2--3\,\% de los granos y casi no
+    afecta las medias por región. Para los mapas por grano conviene
+    volver a correr con el simulador de esta rama.
+  \item Conviene filtrar los atascos que no están en reposo.
+  \item Las presiones de especies distintas se comparan a igual
+    normalización por el área del grano: a igual fuerza, el grano chico
+    tiene más presión. Para separar fuerza y tamaño conviene reportar
+    también $A_pP_p = \tfrac12\sum_c(F_n\lambda + F_t\eta)$, que no
+    depende del área.
+\end{itemize}
+
+\end{document}
