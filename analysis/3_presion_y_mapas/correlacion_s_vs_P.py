@@ -217,6 +217,10 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
     return guardar_figura(out, fig)
 
 
+# tamano de letra de la leyenda (antes 'small'); se cambia con --fs_leyenda
+FS_LEYENDA = 'large'
+
+
 def orden_sistema(sis):
     """Orden de la leyenda: triangulo, cuadrado, pentagono, disco (como el
     resto del paper)."""
@@ -245,7 +249,7 @@ def graficar(df, out, magnitud, region, tipo_s, logx, logy, error, area_ratio, s
     ax.set_ylabel(yl)
     ejes_log(ax, logx, logy)
     ax.legend(title=rf"$R_{{\rm a}} = {area_ratio:g}$", frameon=False,
-              loc='best', fontsize='small')
+              loc='best', fontsize=FS_LEYENDA, title_fontsize=FS_LEYENDA)
     return guardar_figura(out, fig)
 
 
@@ -283,9 +287,16 @@ def main():
                     help='<figura>_datos.csv de una corrida anterior (un punto por sistema y chi, '
                          'columnas sistema, chi, P, P_sem, s, s_sem): grafica desde ahi sin '
                          'necesitar --presion/--av/--idx. Se aplica --chi_max.')
+    ap.add_argument('--fs_leyenda', default='large',
+                    help="letra de la leyenda: small, medium, large (default), o un numero en pt")
     ap.add_argument('--out', default=None,
                     help='pdf de salida (default: 5_graficos_finales/16-s-vs-<P|tau>-<region>-ratio-<r>-W-<W>.pdf)')
     args = ap.parse_args()
+    global FS_LEYENDA
+    try:
+        FS_LEYENDA = float(args.fs_leyenda)
+    except ValueError:
+        FS_LEYENDA = args.fs_leyenda
     if args.loglog:
         args.logx = args.logy = True
 
