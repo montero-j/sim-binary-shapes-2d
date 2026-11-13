@@ -82,8 +82,8 @@ SUFIJO_NUEVO = '_nuevo'
 
 # magnitud -> (prefijo de las columnas del csv, etiqueta del eje y, sufijo del archivo)
 MAGNITUDES = {
-    'P':   ('SumP_reducida',   r'Reduced Mean Pressure $\langle P\rangle d / mg$', ''),
-    'tau': ('SumTau_reducida', r'Reduced Mean Shear Stress $\langle \tau\rangle d / mg$', '_tau'),
+    'P':   ('SumP_reducida',   r'$\langle P\rangle d / mg$', ''),
+    'tau': ('SumTau_reducida', r'$\langle \tau\rangle d / mg$', '_tau'),
 }
 
 RATIO_REGEX = re.compile(r'Ratio_([0-9]+p[0-9]+)')

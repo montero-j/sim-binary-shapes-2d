@@ -58,8 +58,8 @@ COLUMNA_PRESION = {'P': 'SumP_reducida', 'tau': 'SumTau_reducida'}
 # simulaciones m = d = 1, asi que el valor numerico es P/g.
 # Sufijo para no pisar las figuras con la etiqueta vieja (Mg).
 SUFIJO_NUEVO = '_nuevo'
-ETIQUETA_X = {'P': r'Reduced Mean Pressure $\langle P\rangle d / mg$',
-              'tau': r'Reduced Mean Shear Stress $\langle \tau\rangle d / mg$'}
+ETIQUETA_X = {'P': r'$\langle P\rangle d / mg$',
+              'tau': r'$\langle \tau\rangle d / mg$'}
 ETIQUETA_Y = {'big': r'Mean Avalanche Size $\langle s \rangle$',
               'total': r'Mean Avalanche Size $\langle s \rangle$ (all grains)'}
 COLUMNA_S = {'big': 'tamano_big', 'total': 'total_mix'}
@@ -162,7 +162,7 @@ def pearson(x, y, logy):
 
 def ejes_xy(magnitud, region, tipo_s, s_en_x):
     """(columna, error, etiqueta) del eje x y del eje y."""
-    pres = ('P', 'P_sem', f"{ETIQUETA_X[magnitud]} ({NOMBRE_REGION[region]})")
+    pres = ('P', 'P_sem', ETIQUETA_X[magnitud])
     aval = ('s', 's_sem', ETIQUETA_Y[tipo_s])
     return (aval, pres) if s_en_x else (pres, aval)
 
@@ -217,13 +217,22 @@ def graficar_paneles(df, out, magnitud, region, tipo_s, logx, logy, error, chi_m
     return guardar_figura(out, fig)
 
 
+def orden_sistema(sis):
+    """Orden de la leyenda: triangulo, cuadrado, pentagono, disco (como el
+    resto del paper)."""
+    for k, clave in enumerate(('Tri', 'Cuad', 'Pent', 'Disco')):
+        if str(sis).startswith(clave):
+            return (k, str(sis))
+    return (9, str(sis))
+
+
 def graficar(df, out, magnitud, region, tipo_s, logx, logy, error, area_ratio, s_en_x=False):
     aplicar_estilo()
     (xc, xe, xl), (yc, ye, yl) = ejes_xy(magnitud, region, tipo_s, s_en_x)
     if s_en_x:
         logx, logy = logy, logx
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
-    sistemas = sorted(df['sistema'].unique(), key=lambda s: (s != 'Disco(G)-Disco(C)', s))
+    sistemas = sorted(df['sistema'].unique(), key=orden_sistema)
     for sis in sistemas:
         sub = df[df['sistema'] == sis].sort_values('chi')
         color, marker, etiqueta = estilo_sistema(sis)
