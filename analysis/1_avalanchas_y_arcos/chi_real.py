@@ -85,7 +85,11 @@ def analizar(sim_dir):
     for g in granos:
         g['A'] = area_real(g['r'], g['lados'])
         g['A_prev'] = area_prevista(g['r'], g['lados'])
-    grande, chico = sorted(granos[:2], key=lambda g: g['A'], reverse=True)
+    # el aditivo es siempre el tipo 1 (segunda linea de params.in), igual que
+    # en temporal_chi.py. No se ordena por area: con el area real de los
+    # poligonos, un disco 'chico' puede tener mas area que el poligono grande
+    # (ej. triangulo con R_a = 0.4) y se invertirian las especies.
+    grande, chico = granos[0], granos[1]
     m_g = grande['N'] * grande['A'] * grande['dens']
     m_c = chico['N'] * chico['A'] * chico['dens']
     m_g_prev = grande['N'] * grande['A_prev'] * grande['dens']
