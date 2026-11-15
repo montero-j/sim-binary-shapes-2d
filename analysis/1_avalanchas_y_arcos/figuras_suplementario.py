@@ -90,7 +90,7 @@ def fig_matrix_linear(df):
         c, m = color(sis)
         ax.errorbar(x, y, yerr=e, fmt=f'{m}-', color=c, label=etiqueta(sis), **gf.ERRORBAR_KW)
     ax.set_xlabel(r"Concentration $\chi$")
-    ax.set_ylabel(r"Mean Avalanche Size $\langle s \rangle$")
+    ax.set_ylabel(r"$\langle s \rangle$")
     ax.legend(loc='upper left')
     guardar(fig, "SM-matrix-linear.pdf")
 
@@ -148,7 +148,7 @@ def fig_boxplot(av_path, index_path):
     ax.set_xticks(range(len(presentes)))
     ax.set_xticklabels([etiqueta(s) for s in presentes], rotation=15)
     ax.set_xlabel(None)
-    ax.set_ylabel(r"Avalanche Size $s$")
+    ax.set_ylabel(r"$s$")
     guardar(fig, "SM-avalanche-boxplot.pdf")
 
 
@@ -171,7 +171,7 @@ def fig_tortuosity_vs_chi(df_arcos):
                     label=etiqueta(sis), **gf.ERRORBAR_KW)
     ax.set_xlim(-0.01, 0.42)
     ax.set_xlabel(r"Concentration $\chi$")
-    ax.set_ylabel("Arch Tortuosity")
+    ax.set_ylabel(r"$T_{\rm arch}$")
     ax.legend(loc='upper right')
     guardar(fig, "SM-tortuosity-vs-chi.pdf")
 
@@ -190,7 +190,7 @@ def fig_geometria_chi_fijo(df_arcos):
 
     sns.violinplot(data=d, x='sistema', y='Tortuosidad', hue='sistema', order=presentes, palette=paleta,
                    inner='quartile', legend=False, ax=a, cut=0)
-    a.set_ylabel("Arch Tortuosity")
+    a.set_ylabel(r"$T_{\rm arch}$")
 
     for s in presentes:
         g = d[d['sistema'] == s][['Span', 'Longitud']].dropna()
@@ -199,17 +199,17 @@ def fig_geometria_chi_fijo(df_arcos):
             p = np.polyfit(g['Span'], g['Longitud'], 1)
             xx = np.linspace(g['Span'].min(), g['Span'].max(), 50)
             b.plot(xx, np.polyval(p, xx), '-', lw=2.5, color=paleta[s], label=etiqueta(s))
-    b.set_xlabel(r"Arch Span $L_{\rm arch}/d$")
-    b.set_ylabel(r"Arch Length $\ell_{\rm arch}/d$")
+    b.set_xlabel(r"$L_{\rm arch}/d$")
+    b.set_ylabel(r"$\ell_{\rm arch}/d$")
     b.legend(loc='lower right', fontsize='small')
 
     sns.violinplot(data=d, x='sistema', y='Relacion_Aspecto', hue='sistema', order=presentes, palette=paleta,
                    inner='quartile', legend=False, ax=c_, cut=0)
-    c_.set_ylabel(r"Arch Aspect Ratio $L_{\rm arch}/2h_{\rm arch}$")
+    c_.set_ylabel(r"$L_{\rm arch}/2h_{\rm arch}$")
 
     sns.boxplot(data=d, x='sistema', y='Altura', hue='sistema', order=presentes, palette=paleta,
                 legend=False, ax=e)
-    e.set_ylabel(r"Arch Height $h_{\rm arch}/d$")
+    e.set_ylabel(r"$h_{\rm arch}/d$")
 
     for ax in (a, c_, e):
         ax.set_xticks(range(len(presentes)))
