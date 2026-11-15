@@ -18,6 +18,8 @@
 #   SEED                semilla fija para todas (default: una al azar por forma)
 #   SHAPES="DISK TRIANGLE SQUARE PENTAGON"
 #   EXE                 ejecutable (default: simulation/bin/eo-silo, o run_scripts/eo-silo)
+#   CONTENEDOR          si se define (ruta a un .sif), corre eo-silo con
+#                       "apptainer exec $CONTENEDOR", p. ej. ~/work/lab/containers/box2d_2.4.sif
 #   RENDER=1            al terminar, renderiza y arma el video (granular_render + dovideo.sh)
 #   RENDER_EXE, DO_VIDEO  (default: los de renderizar_all.sh)
 #   Y_MIN=-2 Y_MAX=20 FPS=50   ventana vertical y fps del video
@@ -58,6 +60,12 @@ fi
 [ -f "${TEMPLATE}" ] || { echo "ERROR: no encuentro ${TEMPLATE}"; exit 1; }
 [ -x "${EXE}" ] || { echo "ERROR: no encuentro el simulador en ${EXE} (make -C simulation o pasar EXE=...)"; exit 1; }
 EXE="$(realpath "${EXE}")"
+RUN_PREFIX=()
+if [ -n "${CONTENEDOR:-}" ]; then
+    [ -f "${CONTENEDOR}" ] || { echo "ERROR: no encuentro el contenedor ${CONTENEDOR}"; exit 1; }
+    RUN_PREFIX=(apptainer exec "$(realpath "${CONTENEDOR}")")
+    echo ">>> eo-silo se corre dentro de ${CONTENEDOR}"
+fi
 
 get_sides() {
     case "$1" in
@@ -113,7 +121,7 @@ for S_BIG in "${SHAPES[@]}"; do
     sed -i -E "s/${SEARCH_PATTERN}/${N_BIG} ${R_BIG} ${SB} ${PHYSICS_BIG}\n${N_SMALL} ${R_SMALL} ${SS} ${PHYSICS_SMALL}/" "$P"
 
     while [ "$(jobs -rp | wc -l)" -ge "${MAX_JOBS}" ]; do wait -n || true; done
-    ( cd "${RUN_DIR}" && nohup "${EXE}" params.in > simulacion.log 2>&1 ) &
+    ( cd "${RUN_DIR}" && nohup "${RUN_PREFIX[@]}" "${EXE}" params.in > simulacion.log 2>&1 ) &
     echo "   [lanzada] ${RUNID} (N_big=${N_BIG}, N_small=${N_SMALL}, r_small=${R_SMALL}, seed=${SEED_RUN})"
 done
 
