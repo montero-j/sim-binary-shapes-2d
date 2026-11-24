@@ -781,9 +781,9 @@ def plot_arch_composition(df_arcos: pd.DataFrame, sistemas: List[str]):
 
     chi_ref = np.linspace(0.0, 0.45, 200)
     versiones = [
-        ('frac_num', r"Arch Number Fraction of Small Disks $x_{\rm S}^{\rm arch}$",
+        ('frac_num', r"$x_{\rm S}^{\rm arch}$",
          n_s_homogeneo(chi_ref, AR_COMPOSICION), rf"Homogeneous, $n_{{\rm S}}(\chi)$", "6-arch-composition-number"),
-        ('frac_masa', r"Arch Mass Fraction of Small Disks $\chi_{\rm arch}$",
+        ('frac_masa', r"$\chi_{\rm arch}$",
          chi_ref, r"Homogeneous, $\chi_{\rm arch} = \chi$", "6-arch-composition-mass"),
         ('frac_masa_rel', r"$\chi_{\rm arch}/\chi$",
          np.ones_like(chi_ref), r"Homogeneous, $\chi_{\rm arch} = \chi$", "6-arch-composition-mass-ratio"),
@@ -962,7 +962,7 @@ def plot_arch_evolution_vs_chi(df_stats: pd.DataFrame):
     df_filtered = df_filtered[(df_filtered['chi'] >= 0) & (df_filtered['chi'] <= 0.4)]
 
     metrics = {
-        'Relacion_Aspecto': r'Arch Aspect Ratio $L_{\rm arch}/2h_{\rm arch}$',
+        'Relacion_Aspecto': r'$L_{\rm arch}/2h_{\rm arch}$',
         'Tortuosidad': 'Arch Tortuosity',
     }
 

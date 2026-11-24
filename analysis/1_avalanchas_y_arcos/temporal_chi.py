@@ -55,6 +55,13 @@ PREFIJO_NUEVO = None
 # Intervalo de tiempo a analizar (s); None = desde el principio / hasta el final
 T_MIN = None
 T_MAX = None
+# --chi_real: la referencia (y las medidas de segregacion) usan el chi real
+# de la caja, calculado desde params.in con las areas de Box2D (chi_real.py),
+# en vez del chi del nombre de la carpeta.
+CHI_REAL = False
+# --escalar_a_carpeta: la curva chi_eff(t) se multiplica por chi_carpeta/chi_real,
+# asi arranca en el chi de la carpeta (la referencia sigue siendo el de la carpeta).
+ESCALAR = False
 
 
 def area_grano(radio, n_lados):
@@ -106,6 +113,23 @@ def calcular_chi_temporal(row):
     # 'chi' ya es la concentración objetivo del diseño experimental
     # (confirmado: a r_ratio_nominal fijo, 'chi' es la variable barrida).
     chi_nominal = row['chi']
+    ra_real = None
+    factor = 1.0
+    if CHI_REAL or ESCALAR:
+        from chi_real import analizar as _analizar_chi_real
+        r = _analizar_chi_real(path)
+        if r is None:
+            return {**base, 'status': 'sin_params_in_para_chi_real'}, None
+        if CHI_REAL:
+            chi_nominal, ra_real = r['chi_real'], r['Ra_real']
+        elif r['chi_real'] > 0:
+            factor = chi_nominal / r['chi_real']
+            # leyenda: el R_a que quiso el generador (coherente con el chi de
+            # la carpeta), no el del index (que usa pi r^2 para todo)
+            # redondeado a 1 cifra significativa (0.1146 -> 0.1), el valor
+            # nominal del barrido
+            ra_real = float(f"{r['Ra_prevista']:.1g}") if pd.notnull(r.get('Ra_prevista')) else None
+            base['factor_escala'] = factor
 
     if len(grain_info) < 2:
         # Sistema monodisperso (sin aditivo): no hay dos poblaciones que
@@ -176,12 +200,12 @@ def calcular_chi_temporal(row):
         a_total_out = sum(counts.get(t, 0) * areas_unitarias[t] for t in areas_unitarias.keys())
         if a_total_out > 0:
             batch_results.append({'tiempo': float(label) + WINDOW_SIZE / 2,
-                                  'chi_eff': a_chicas_out / a_total_out})
+                                  'chi_eff': factor * a_chicas_out / a_total_out})
 
     df_plot = pd.DataFrame(batch_results)
     if df_plot.empty:
         return {**base, 'status': 'sin_batches_validos'}, None
-    return {**base, 'status': 'ok', 'chi_nominal': chi_nominal}, df_plot
+    return {**base, 'status': 'ok', 'chi_nominal': chi_nominal, 'Ra_real': ra_real}, df_plot
 
 
 def medir_segregacion(df_plot, chi_nominal):
@@ -261,7 +285,7 @@ def _xlim_intervalo(ax):
         ax.set_xlim(T_MIN if T_MIN is not None else lo, T_MAX if T_MAX is not None else hi)
 
 
-def figura_comparativa(df_idx, casos, out, normalizar=False):
+def figura_comparativa(df_idx, casos, out, normalizar=False, cortar=False):
     """chi_eff(t) de varias simulaciones en un mismo grafico (solo lineas),
     cada una con su chi nominal como linea discontinua del mismo color.
     casos: lista de sim_hash (se aceptan prefijos), o ['todos'] para todas las
@@ -272,6 +296,7 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
     _estilo()
     fig, ax = plt.subplots(figsize=(10, 5))
     y_max = 0.0
+    datos = []
     for k, h in enumerate(casos):
         fila = df_idx[df_idx['sim_hash'].astype(str).str.startswith(str(h))]
         if fila.empty:
@@ -282,12 +307,22 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
         if d is None:
             print(f"  [!] {h}: {info['status']} {info.get('detail', '')}")
             continue
+        datos.append((k, row, info, d))
+    t_corte = None
+    if cortar and datos:
+        # todas las curvas terminan en el ultimo dato de la mas corta
+        t_corte = min(float(d['tiempo'].max()) for *_, d in datos)
+        datos = [(k, row, info, d[d['tiempo'] <= t_corte]) for k, row, info, d in datos]
+        print(f"--cortar_al_mas_corto: todas las curvas hasta t = {t_corte:.0f} s")
+    for k, row, info, d in datos:
         chi_nom = info['chi_nominal']
         y = d['chi_eff'] / chi_nom if normalizar else d['chi_eff']
         color = COLORES_CASOS[k % len(COLORES_CASOS)]
         _, _, nombre = estilo_sistema(row.get('system_type', ''))
         extra = ''
-        if 'area_ratio_nominal' in row and pd.notnull(row['area_ratio_nominal']):
+        if info.get('Ra_real') is not None and pd.notnull(info['Ra_real']):
+            extra = rf', $R_{{\rm a}} = {info["Ra_real"]:.2g}$'
+        elif 'area_ratio_nominal' in row and pd.notnull(row['area_ratio_nominal']):
             extra = rf', $R_{{\rm a}} = {row["area_ratio_nominal"]:g}$'
         ax.plot(d['tiempo'], y, '-', color=color, lw=1.2, zorder=2,
                 label=rf'{nombre}, $\chi = {chi_nom:.3g}${extra}')
@@ -308,16 +343,20 @@ def figura_comparativa(df_idx, casos, out, normalizar=False):
     n_casos = len(ax.get_legend_handles_labels()[1])
     ax.set_ylim(0, y_max * (1.2 + 0.12 * n_casos) if y_max > 0 else 1)
     _xlim_intervalo(ax)
+    if t_corte is not None:
+        ax.set_xlim(T_MIN if T_MIN is not None else 0, t_corte)
     ax.legend(loc='upper right')
     guardar_figura(out, fig)
     plt.close(fig)
     print(f"Figura: {out if os.path.splitext(out)[1] else out + '.' + FORMATO}")
 
 
-def _inicializar_worker(viejo, nuevo, ventana, formato, t_min=None, t_max=None):
+def _inicializar_worker(viejo, nuevo, ventana, formato, t_min=None, t_max=None, chi_real=False,
+                        escalar=False):
     # los workers no heredan lo que main() cambia despues de importar el
     # modulo (con 'spawn' seguro, con 'fork' depende): se pasa explicito
-    global PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO, T_MIN, T_MAX
+    global PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO, T_MIN, T_MAX, CHI_REAL, ESCALAR
+    CHI_REAL, ESCALAR = chi_real, escalar
     PREFIJO_VIEJO, PREFIJO_NUEVO, WINDOW_SIZE, FORMATO = viejo, nuevo, ventana, formato
     T_MIN, T_MAX = t_min, t_max
 
@@ -364,6 +403,15 @@ def main():
                         help="fin del intervalo de tiempo (s); vale para todos los modos")
     parser.add_argument('--out', default=os.path.join(rutas.GRAFICOS_FINALES_DIR, 'chi_temporal_comparacion'),
                         help="figura comparativa (sin extension -> --formato)")
+    parser.add_argument('--chi_real', action='store_true',
+                        help="referencia, leyenda y medidas de segregacion con el chi real de la caja "
+                             "(desde params.in, areas de Box2D) en vez del chi de la carpeta")
+    parser.add_argument('--escalar_a_carpeta', action='store_true',
+                        help="multiplica chi_eff(t) por chi_carpeta/chi_real (desde params.in): la curva "
+                             "arranca en el chi de la carpeta; la referencia sigue siendo el de la carpeta")
+    parser.add_argument('--cortar_al_mas_corto', action='store_true',
+                        help="figura comparativa: todas las curvas (y el eje x) terminan en el ultimo "
+                             "dato de la simulacion mas corta")
     parser.add_argument('--ranking', action='store_true',
                         help="no grafica: calcula la segregacion de cada simulacion y lista las que mas segregan")
     parser.add_argument('--sistema', nargs='+', default=None,
@@ -372,6 +420,8 @@ def main():
     parser.add_argument('--area_ratio', type=float, nargs='+', default=None,
                         help="filtra area_ratio_nominal (relacion de areas chico/grande, ej. 0.1)")
     args = parser.parse_args()
+    if args.chi_real and args.escalar_a_carpeta:
+        raise SystemExit("--chi_real y --escalar_a_carpeta son alternativas: usar una sola.")
     if (args.prefijo_viejo is None) != (args.prefijo_nuevo is None):
         raise SystemExit("--prefijo_viejo y --prefijo_nuevo van juntos.")
 
@@ -399,7 +449,7 @@ def main():
         if df_idx.empty:
             raise SystemExit("Ninguna simulacion coincide con --incluir.")
     # este proceso tambien usa las opciones (figura comparativa)
-    _inicializar_worker(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato, args.t_min, args.t_max)
+    _inicializar_worker(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato, args.t_min, args.t_max, args.chi_real, args.escalar_a_carpeta)
     if args.sistema:
         df_idx = df_idx[df_idx['system_type'].isin(args.sistema)]
     if args.chi:
@@ -415,14 +465,15 @@ def main():
             raise SystemExit("Ninguna simulacion cumple los filtros (revisar --sistema / --chi / --area_ratio).")
 
     if args.casos:
-        figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar)
+        figura_comparativa(df_idx, args.casos, args.out, normalizar=args.normalizar,
+                           cortar=args.cortar_al_mas_corto)
         return
 
     if args.ranking:
         tasks = [row for _, row in df_idx.iterrows()]
         with Pool(args.workers, initializer=_inicializar_worker,
                   initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato,
-                            args.t_min, args.t_max)) as p:
+                            args.t_min, args.t_max, args.chi_real, args.escalar_a_carpeta)) as p:
             res = p.map(_segregacion_fila, tasks)
         r = pd.DataFrame([x for x in res if x is not None])
         if r.empty:
@@ -447,7 +498,7 @@ def main():
     tasks = [row for _, row in df_idx.iterrows()]
     with Pool(args.workers, initializer=_inicializar_worker,
               initargs=(args.prefijo_viejo, args.prefijo_nuevo, args.ventana, args.formato,
-                            args.t_min, args.t_max)) as p:
+                            args.t_min, args.t_max, args.chi_real, args.escalar_a_carpeta)) as p:
         resultados = p.map(analizar_flujo_temporal, tasks)
 
     conteo = Counter(r['status'] for r in resultados)
