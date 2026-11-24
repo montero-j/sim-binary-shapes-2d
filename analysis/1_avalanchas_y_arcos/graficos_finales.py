@@ -474,8 +474,20 @@ def plot_sweeps_by_system(
         save_plot(nombre)
 
 
-def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: bool = False, masa: bool = False):
+# Fig. 6 (5b, 5c): mezclas con matriz poligonal y discos chicos, SOLO R_a = 0.1
+# (la misma seleccion que la curva R_a = 0.1 de la Fig. 7 y que las figuras del
+# Supplemental). Antes se usaba R_a ~ 0.15 +- 0.07, que para los poligonos
+# juntaba y promediaba las corridas de R_a = 0.1 y R_a = 0.2.
+RA_FIG6, RA_FIG6_TOL = 0.1, 0.02
+# 5a (aditivas, grano grande disco y chicos poligonales): se deja como estaba.
+RA_ADITIVAS, RA_ADITIVAS_TOL = 0.15, 0.07
+
+
+def plot_geometric_effects(df: pd.DataFrame, target_ar: float = RA_FIG6, total: bool = False, masa: bool = False,
+                           atol: float = RA_FIG6_TOL):
     """5a/5b: tamano medio de avalancha normalizado por el del sistema puro.
+    5b (matriz poligonal + discos chicos) usa R_a = target_ar +- atol (0.1 +- 0.02);
+    5a (aditivas) sigue con R_a ~ 0.15 +- 0.07.
     total=False: <s> = granos grandes por avalancha (S_mean).
     total=True:  <s_T> = todos los granos, grandes + chicos (ST_mean); solo 5b,
                  archivo 5b-matrix-normalized-total.
@@ -490,7 +502,7 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: boo
         print(f"  [!] {mean_col} no esta en estadisticas_flujo_agregadas.csv: correr flow_analysis.py de nuevo.")
         return
     print(f"  -> Plotting 5{'b' if total or masa else 'a/b'}{' total' if total else ''}{' mass' if masa else ''}: "
-          f"Normalized Effects (R_a ~ {target_ar})...")
+          f"Normalized Effects (matrix R_a = {target_ar} +- {atol}; additive R_a ~ {RA_ADITIVAS})...")
 
     df_mix = df[df['chi'] > 0].copy()
     if df_mix.empty:
@@ -512,10 +524,10 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: boo
     ylabel = (rf"$\ln(\langle {v}_{{\rm T}} \rangle / \langle {v}_{{\rm T,0}} \rangle + 1)$" if total
               else rf"$\ln(\langle {v} \rangle / \langle {v}_0 \rangle + 1)$")
 
-    def draw(sistemas: List[str], filename: str):
+    def draw(sistemas: List[str], filename: str, ra: float, tol: float):
         plt.figure()
         for sis in sistemas:
-            grp = filter_standard_size(df_norm[df_norm['sistema'] == sis], target_ar, 0.07)
+            grp = filter_standard_size(df_norm[df_norm['sistema'] == sis], ra, tol)
             if grp.empty:
                 continue
             grp_sis = (
@@ -545,19 +557,22 @@ def plot_geometric_effects(df: pd.DataFrame, target_ar: float = 0.15, total: boo
 
     matriz = ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Oct(G)-Disco(C)']
     if total or masa:
-        draw(matriz, "5b-matrix-normalized" + ("-total" if total else "") + ("-mass" if masa else ""))
+        draw(matriz, "5b-matrix-normalized" + ("-total" if total else "") + ("-mass" if masa else ""),
+             target_ar, atol)
         return
-    draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)', 'Disco(G)-Oct(C)'], "5a-additive-normalized")
-    draw(matriz, "5b-matrix-normalized")
+    draw(['Disco(G)-Disco(C)', 'Disco(G)-Cuad(C)', 'Disco(G)-Pent(C)', 'Disco(G)-Tri(C)', 'Disco(G)-Oct(C)'],
+         "5a-additive-normalized", RA_ADITIVAS, RA_ADITIVAS_TOL)
+    draw(matriz, "5b-matrix-normalized", target_ar, atol)
 
 
-def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = 0.15):
-    print(f"  -> Plotting 5c: Raw Log-Size Matrix Effect (R_a ~ {target_ar})...")
+def plot_geometric_effects_raw(df: pd.DataFrame, target_ar: float = RA_FIG6, atol: float = RA_FIG6_TOL):
+    """5c (Fig. 6a): ln(<s>+1) vs chi, una curva por forma, R_a = target_ar +- atol."""
+    print(f"  -> Plotting 5c: Raw Log-Size Matrix Effect (R_a = {target_ar} +- {atol})...")
     main_dd = df['D_d_sq'].value_counts().idxmax()
 
     plt.figure()
     for sis in ['Disco(G)-Disco(C)', 'Cuad(G)-Disco(C)', 'Pent(G)-Disco(C)', 'Tri(G)-Disco(C)', 'Oct(G)-Disco(C)']:
-        grp = filter_standard_size(df[df['D_d_sq'] == main_dd], target_ar, 0.07)
+        grp = filter_standard_size(df[df['D_d_sq'] == main_dd], target_ar, atol)
         grp_sis = (
             grp[grp['sistema'] == sis]
             .groupby('chi')
