@@ -6,7 +6,13 @@ de los atascos, un punto por simulacion (sistema, chi, razon de areas,
 orificio).
 
 Figura: un solo panel, color y marcador por sistema (estilo_figuras.py),
-puntos sin lineas. Se usa un solo orificio W (el _W_ de la carpeta, --W,
+puntos sin lineas. Un punto por (sistema, chi), igual que
+comparar_presion_por_chi.py: si hay varias simulaciones con el mismo chi
+(otra tirada de la misma configuracion, o los varios puros que se suman como
+chi = 0), se juntan sus atascos (presion media pesada por area, error entre
+atascos) y sus avalanchas (<s> y error estandar sobre todas). Una misma
+simulacion indexada en dos rutas (mismos datos) se cuenta una sola vez.
+--por_simulacion: un punto por simulacion, como antes. Se usa un solo orificio W (el _W_ de la carpeta, --W,
 default 2.0) para que <s> sea comparable. --logy / --logx / --loglog: eje
 y, eje x o los dos en escala logaritmica (el pdf lleva el sufijo -logy,
 -logx o -loglog, asi no pisa la version lineal).
@@ -88,15 +94,22 @@ def presion_por_simulacion(path_csv, magnitud, region):
     faltan = [c for c in (col_sum, col_area) if c not in df.columns]
     if faltan:
         sys.exit(f"[!] Al csv de presion le faltan las columnas {faltan}")
-    filas = []
+    filas, atascos, claves = [], [], set()
     for sim_path, g in df.groupby('sim_path'):
+        if clave_carpeta(sim_path) in claves:
+            # la misma carpeta montada en otra ruta: sus atascos ya estan
+            print(f"  [aviso] {sim_path}: misma carpeta que otra ruta ya leida, se cuenta una vez")
+            continue
+        claves.add(clave_carpeta(sim_path))
         w = g[col_area].to_numpy(float)
         with np.errstate(invalid='ignore', divide='ignore'):
             x = g[col_sum].to_numpy(float) / w
         media, std, sem, n, _ = _estadistica_pesada(x, w)
-        filas.append(dict(clave=clave_carpeta(sim_path), sim_path=sim_path, P=media, P_sem=sem,
-                          n_atascos=n))
-    return pd.DataFrame(filas)
+        clave = clave_carpeta(sim_path)
+        filas.append(dict(clave=clave, sim_path=sim_path, P=media, P_sem=sem, n_atascos=n))
+        atascos.append(pd.DataFrame({'clave': clave, 'x': x, 'w': w}))
+    return pd.DataFrame(filas), (pd.concat(atascos, ignore_index=True) if atascos
+                                 else pd.DataFrame(columns=['clave', 'x', 'w']))
 
 
 def avalanchas_por_simulacion(path_av, path_idx, col_s, solo_con_arco):
@@ -114,7 +127,49 @@ def avalanchas_por_simulacion(path_av, path_idx, col_s, solo_con_arco):
     g.columns = ['sim_hash', 's', 's_sem', 'n_avalanchas']
     cols = [c for c in ('sim_hash', 'clave', 'system_type', 'chi', 'area_ratio_nominal', 'Radio_salida')
             if c in idx.columns]
-    return g.merge(idx[cols], on='sim_hash', how='inner')
+    return g.merge(idx[cols], on='sim_hash', how='inner'), av[['sim_hash', col_s]].rename(columns={col_s: 's'})
+
+
+def agrupar_por_chi(df, atascos, avalanchas):
+    """Un punto por (sistema, chi) a partir de las filas por simulacion de df.
+    Presion: media pesada por area de TODOS los atascos de esas simulaciones,
+    con el error entre atascos (_estadistica_pesada, como
+    comparar_presion_por_chi.py). <s>: media y error estandar de todas sus
+    avalanchas. Simulaciones con los mismos datos (la misma carpeta indexada
+    dos veces) se cuentan una sola vez."""
+    filas = []
+    for (sis, chi), g in df.groupby(['sistema', 'chi'], sort=True):
+        # duplicados exactos: misma secuencia de avalanchas y mismos atascos
+        vistos, sims = set(), []
+        for _, f in g.iterrows():
+            a = avalanchas.loc[avalanchas['sim_hash'] == f['sim_hash'], 's'].to_numpy(float)
+            p = atascos.loc[atascos['clave'] == f['clave'], 'x'].to_numpy(float)
+            firma = (tuple(a), tuple(np.round(p, 10)))
+            if firma in vistos:
+                print(f"  [aviso] {sis} chi = {chi:g}: {f['clave']} repite los datos de otra carpeta, se cuenta una vez")
+                continue
+            vistos.add(firma)
+            sims.append(f)
+        g = pd.DataFrame(sims)
+        at = atascos[atascos['clave'].isin(g['clave'])]
+        x, w = at['x'].to_numpy(float), at['w'].to_numpy(float)
+        P, _, P_sem, n_at, _ = _estadistica_pesada(x, w)
+        s_all = avalanchas.loc[avalanchas['sim_hash'].isin(g['sim_hash']), 's'].to_numpy(float)
+        s_sem = s_all.std(ddof=1) / np.sqrt(len(s_all)) if len(s_all) > 1 else np.nan
+        fila = dict(sistema=sis, system_type=g['system_type'].iloc[0], chi=chi, P=P, P_sem=P_sem,
+                    n_atascos=n_at, s=s_all.mean(), s_sem=s_sem, n_avalanchas=len(s_all),
+                    n_simulaciones=len(g), clave=' | '.join(g['clave']))
+        for c in ('area_ratio_nominal', 'Radio_salida', 'W'):
+            if c in g.columns:
+                fila[c] = g[c].iloc[0] if g[c].nunique(dropna=False) == 1 else np.nan
+        filas.append(fila)
+    out = pd.DataFrame(filas)
+    multi = out[out['n_simulaciones'] > 1]
+    if len(multi):
+        print("Puntos que juntan varias simulaciones (mismo sistema y chi):")
+        for _, f in multi.iterrows():
+            print(f"  {f['sistema']:20s} chi = {f['chi']:<6g} {f['n_simulaciones']} sims: {f['clave']}")
+    return out
 
 
 def agregar_puros(df):
@@ -283,6 +338,8 @@ def main():
                     help='<s> en el eje x (variable independiente) y la presion en el eje y; '
                          '--logy sigue siendo <s> logaritmico')
     ap.add_argument('--sin_error', action='store_true', help='sin barras de error')
+    ap.add_argument('--por_simulacion', action='store_true',
+                    help='un punto por simulacion (como antes), sin juntar las que comparten sistema y chi')
     ap.add_argument('--datos', default=None,
                     help='<figura>_datos.csv de una corrida anterior (un punto por sistema y chi, '
                          'columnas sistema, chi, P, P_sem, s, s_sem): grafica desde ahi sin '
@@ -312,8 +369,8 @@ def main():
                 df[col] = np.nan
         return _salida(df, args)
 
-    pres = presion_por_simulacion(args.presion, args.magnitud, args.region)
-    aval = avalanchas_por_simulacion(args.av, args.idx, COLUMNA_S[args.s], args.solo_con_arco)
+    pres, atascos = presion_por_simulacion(args.presion, args.magnitud, args.region)
+    aval, avalanchas = avalanchas_por_simulacion(args.av, args.idx, COLUMNA_S[args.s], args.solo_con_arco)
     df = aval.merge(pres, on='clave', how='inner')
     print(f"Simulaciones: {len(pres)} con presion, {len(aval)} con avalanchas, {len(df)} en ambas.")
     if df.empty:
@@ -335,6 +392,10 @@ def main():
     if df.empty:
         sys.exit("[!] No quedo ninguna simulacion despues de filtrar (--W, --area_ratio, --radio_salida, --chi_max).")
     df['sistema'] = df['system_type'].map(lambda s: SYSTEM_NAME_MAP.get(str(s), str(s)))
+    if not args.por_simulacion:
+        n_antes = len(df)
+        df = agrupar_por_chi(df, atascos, avalanchas)
+        print(f"{n_antes} simulaciones -> {len(df)} puntos (uno por sistema y chi).")
     _salida(df, args)
 
 
@@ -353,8 +414,8 @@ def _salida(df, args):
         f"{nombre}-{args.region}-ratio-{args.area_ratio:g}-W-{args.W:g}{sufijo}{SUFIJO_NUEVO}.pdf")
     datos = os.path.splitext(out)[0] + '_datos.csv'
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    cols = ['sistema', 'chi', 'area_ratio_nominal', 'Radio_salida', 'W', 'clave', 'P', 'P_sem', 'n_atascos',
-            's', 's_sem', 'n_avalanchas']
+    cols = ['sistema', 'chi', 'area_ratio_nominal', 'Radio_salida', 'W', 'n_simulaciones', 'clave', 'P', 'P_sem',
+            'n_atascos', 's', 's_sem', 'n_avalanchas']
     df.sort_values(['sistema', 'chi'])[[c for c in cols if c in df.columns]].to_csv(datos, index=False)
     print("Puntos por sistema y familia (Radio_salida, W): valores de chi")
     for (sis, rs, w), g in df.groupby(['sistema', 'Radio_salida', 'W'], dropna=False):
